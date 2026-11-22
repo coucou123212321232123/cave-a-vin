@@ -10,13 +10,29 @@ python -m http.server 5173
 
 Puis ouvrir http://localhost:5173
 
+## En ligne
+
+Site : https://coucou123212321232123.github.io/cave-a-vin/
+Dépôt : https://github.com/coucou123212321232123/cave-a-vin
+
+Le site est publié par GitHub Pages depuis la branche `main`.
+
+## Faire des modifications et les publier
+
+```powershell
+git add -A
+git commit -m "Ce que j'ai changé"
+git push
+```
+
+Le site se met à jour 1 à 2 minutes après le push. Sur le téléphone, fermer puis rouvrir l'appli pour voir la nouvelle version.
+
+Si la liste de bouteilles de `js/data.js` a changé, l'appli propose « La liste de la cave a été mise à jour → Charger ».
+**Charger remplace les bouteilles du téléphone** par celles du fichier. L'historique des bouteilles ouvertes est gardé.
+
 ## Installer sur le téléphone
 
-L'appli doit être servie en **https** pour pouvoir s'installer. Le plus simple :
-
-1. **Netlify Drop** : aller sur https://app.netlify.com/drop et glisser ce dossier entier → une URL https est fournie.
-   (ou GitHub Pages / Cloudflare Pages, au choix)
-2. Ouvrir l'URL sur le téléphone :
+1. Ouvrir le lien du site sur le téléphone :
    - **iPhone (Safari)** : bouton Partager → « Sur l'écran d'accueil »
    - **Android (Chrome)** : menu ⋮ → « Installer l'application »
 

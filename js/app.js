@@ -12,6 +12,12 @@ const norm = (s) => String(s ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toL
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
 
 /* ————————————————— État ————————————————— */
+// Empreinte de js/data.js : permet de détecter qu'une nouvelle liste a été poussée
+const SEED_HASH = (() => {
+  let h = 0; const s = JSON.stringify(SEED);
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+  return String(h);
+})();
 let state = load();
 const ui = { view: "cave", filter: "all", q: "", sort: "domaine", openId: null };
 
@@ -20,13 +26,13 @@ function load() {
     const raw = localStorage.getItem(STORE_KEY);
     if (raw) {
       const s = JSON.parse(raw);
-      if (Array.isArray(s.wines)) return { wines: s.wines, history: s.history || [] };
+      if (Array.isArray(s.wines)) return { wines: s.wines, history: s.history || [], seedHash: s.seedHash ?? SEED_HASH };
     }
   } catch {}
   return fresh();
 }
 function fresh() {
-  return { wines: SEED.map((w) => ({ id: uid(), notes: "", ...structuredClone(w) })), history: [] };
+  return { wines: SEED.map((w) => ({ id: uid(), notes: "", ...structuredClone(w) })), history: [], seedHash: SEED_HASH };
 }
 function save() {
   try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch {}
@@ -496,6 +502,19 @@ $("#btn-add").onclick = () => openForm(null);
 $("#btn-settings").onclick = openSettings;
 
 render();
+
+// La liste de js/data.js a changé depuis la dernière visite : proposer de la charger
+if (state.seedHash !== SEED_HASH) {
+  const t = $("#toast");
+  t.innerHTML = `<span>La liste de la cave a été mise à jour.</span><button id="seed-yes">Charger</button><button id="seed-no" style="color:#7d6b65">Ignorer</button>`;
+  t.classList.add("on");
+  $("#seed-yes").onclick = () => {
+    const history = state.history;
+    state = fresh(); state.history = history;
+    save(); render(); t.classList.remove("on"); toast("Nouvelle liste chargée");
+  };
+  $("#seed-no").onclick = () => { state.seedHash = SEED_HASH; save(); t.classList.remove("on"); };
+}
 
 // Préchargement discret du moteur 3D, puis service worker (mode hors-ligne)
 setTimeout(() => load3D().catch(() => {}), 1200);
