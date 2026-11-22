@@ -2,8 +2,8 @@
 
 Petite appli (PWA) pour visualiser la cave à vin depuis un téléphone : cave en 3D, bouteilles et étiquettes de chaque domaine, inventaire, fenêtres de dégustation, ajout / modification et historique des bouteilles ouvertes.
 
-- Touchez la cave (ou « Entrer dans la cave ») : elle pivote face à vous.
-- Glissez vers le haut / bas pour parcourir les étagères, touchez une bouteille : elle sort et vient devant vous.
+- Touchez la cave (ou « Entrer dans la cave ») : elle pivote face à vous et la porte vitrée s'efface.
+- Glissez dans tous les sens pour parcourir les clayettes des deux portes (la vue est assez proche pour lire les étiquettes), touchez une bouteille : elle sort et vient devant vous.
 - Glissez à gauche / droite pour la faire tourner ; « Déboucher » la retire de la cave.
 
 ## Fichiers

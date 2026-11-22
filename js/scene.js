@@ -26,8 +26,13 @@ function studioEnvironment(renderer, boost = 1) {
 }
 
 const BG = 0xf3ede3;
-const SLOT = 10.8, PER = 6, SIDE = 2.6, DEPTH = 34, SHELF_T = 2.4, GAP = 36, PLINTH = 8, TOP = 3.4;
-const INNER_W = PER * SLOT + 1.6, OUT_W = INNER_W + SIDE * 2;
+// Cave de vieillissement noire à deux portes vitrées, 6 bouteilles debout par clayette et par porte
+const SLOT = 10.8, PER_DOOR = 6, DOORS = 2, PER = PER_DOOR * DOORS;
+const SIDE = 3, MID = 3.2, DEPTH = 40, SHELF_T = 1.8, GAP = 35.5, FEET = 3, BASE = 26, TOP = 10;
+const INNER_W = PER_DOOR * SLOT + 1.6, OUT_W = INNER_W * DOORS + MID + SIDE * 2;
+const TILT = -0.3;           // bouteilles penchées vers l'arrière
+const BOTTLE_Z = 7.5;        // pied des bouteilles, derrière la barre de façade
+const doorX = (d) => (d - (DOORS - 1) / 2) * (INNER_W + MID);
 const FOV = 32, TAN = Math.tan(THREE.MathUtils.degToRad(FOV / 2));
 const LOW_RES = 46, HI_RES = 150;
 
@@ -37,7 +42,7 @@ let mode = "overview";
 let bottles = [];
 let focused = null;
 let cb = {};
-let panY = 0, panVel = 0, spin = 0, spinVel = 0, lastInteract = 0;
+let panY = 0, panVel = 0, panX = 0, panVelX = 0, spin = 0, spinVel = 0, lastInteract = 0;
 let tweens = [];
 let dirty = true;
 const V = (x, y) => new THREE.Vector2(x, y);
@@ -243,47 +248,98 @@ function glowTexture(inner, outer = "rgba(255,200,140,0)") {
   return t;
 }
 
-let woodMat, woodMatH, backMat, ledMat, glowMat, poolMat, shadowBlobMat;
+let blackMat, interiorMat, shelfMat, beechMat, steelMat, glassMat, lcdMat, ledMat, glowMat, poolMat, shadowBlobMat;
+const GLASS_OPACITY = 0.2;
+function lcdTexture() {
+  const c = document.createElement("canvas"); c.width = 256; c.height = 64;
+  const x = c.getContext("2d");
+  x.fillStyle = "#0a0b0c"; x.fillRect(0, 0, 256, 64);
+  x.fillStyle = "#e9f3ff"; x.font = "600 40px Inter, sans-serif"; x.textAlign = "center"; x.textBaseline = "middle";
+  x.fillText("12.0°C", 128, 34);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
 function initCabinetMaterials() {
-  woodMat = new THREE.MeshStandardMaterial({ map: woodTexture("#cfae84", "#7a5532"), roughness: 0.62, envMapIntensity: 0.6 });
-  woodMatH = new THREE.MeshStandardMaterial({ map: woodTexture("#cfae84", "#7a5532", 512, 1024, true), roughness: 0.62, envMapIntensity: 0.6 });
-  backMat = new THREE.MeshStandardMaterial({ map: woodTexture("#5a3f2c", "#2a1a10"), roughness: 0.75, envMapIntensity: 0.4 });
-  ledMat = new THREE.MeshStandardMaterial({ color: 0xfff3dc, emissive: 0xffd6a0, emissiveIntensity: 2.2 });
-  glowMat = new THREE.MeshBasicMaterial({ map: glowTexture("rgba(255,205,145,.55)"), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false });
-  poolMat = new THREE.MeshBasicMaterial({ map: glowTexture("rgba(255,215,160,.35)"), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false });
+  blackMat = new THREE.MeshPhysicalMaterial({ color: 0x0c0c0d, roughness: 0.42, clearcoat: 0.35, clearcoatRoughness: 0.3, envMapIntensity: 0.7 });
+  interiorMat = new THREE.MeshStandardMaterial({ color: 0x18181a, roughness: 0.92, envMapIntensity: 0.3 });
+  shelfMat = new THREE.MeshStandardMaterial({ color: 0x1d1d1f, roughness: 0.7, envMapIntensity: 0.4 });
+  beechMat = new THREE.MeshStandardMaterial({ map: woodTexture("#dcb880", "#a8773f", 512, 1024, true), roughness: 0.5, envMapIntensity: 0.7 });
+  steelMat = new THREE.MeshStandardMaterial({ color: 0xc4c1bb, metalness: 0.85, roughness: 0.3, envMapIntensity: 1 });
+  glassMat = new THREE.MeshPhysicalMaterial({
+    color: 0x0b0d0d, roughness: 0.03, metalness: 0, transparent: true, opacity: GLASS_OPACITY, depthWrite: false,
+    envMapIntensity: 1.6, specularIntensity: 1, clearcoat: 1,
+  });
+  lcdMat = new THREE.MeshBasicMaterial({ map: lcdTexture(), toneMapped: false });
+  ledMat = new THREE.MeshStandardMaterial({ color: 0xfff6e8, emissive: 0xffe2b8, emissiveIntensity: 2.4 });
+  glowMat = new THREE.MeshBasicMaterial({ map: glowTexture("rgba(255,222,180,.30)"), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false });
+  poolMat = new THREE.MeshBasicMaterial({ map: glowTexture("rgba(255,225,185,.22)"), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false });
   shadowBlobMat = new THREE.MeshBasicMaterial({ map: glowTexture("rgba(60,40,25,.38)", "rgba(60,40,25,0)"), transparent: true, depthWrite: false });
 }
 
 function buildFrame() {
   if (frame) { root.remove(frame); frame.traverse((o) => o.geometry?.dispose()); }
   frame = new THREE.Group();
-  cabH = PLINTH + shelfCount * (SHELF_T + GAP) + TOP;
+  cabH = BASE + shelfCount * (SHELF_T + GAP) + TOP;
+  const innerTop = cabH - TOP, front = DEPTH / 2;
   const box = (w, h, d, mat, x, y, z, cast = true) => {
     const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
     m.position.set(x, y, z); m.castShadow = cast; m.receiveShadow = true;
     frame.add(m); return m;
   };
-  // côtés, dessus, socle, fond
-  box(SIDE, cabH, DEPTH, woodMat, -INNER_W / 2 - SIDE / 2, cabH / 2, 0);
-  box(SIDE, cabH, DEPTH, woodMat, INNER_W / 2 + SIDE / 2, cabH / 2, 0);
-  box(OUT_W + 0.6, TOP, DEPTH + 0.8, woodMatH, 0, cabH - TOP / 2, 0.2);
-  box(INNER_W, PLINTH - 1.5, DEPTH - 4, backMat, 0, (PLINTH - 1.5) / 2, -1.5);
-  box(INNER_W, 1.2, DEPTH, woodMatH, 0, PLINTH - 0.6, 0);
-  box(INNER_W, cabH - PLINTH, 1.2, backMat, 0, PLINTH + (cabH - PLINTH) / 2, -DEPTH / 2 + 0.6, false);
-  for (let i = 0; i < shelfCount; i++) {
-    const y = PLINTH + i * (SHELF_T + GAP);
-    if (i > 0) box(INNER_W, SHELF_T, DEPTH - 1.2, woodMatH, 0, y + SHELF_T / 2, 0.6);
-    const ceil = y + SHELF_T + GAP; // dessous de l'étagère au-dessus
-    // ruban LED sous l'étagère du dessus
-    const led = new THREE.Mesh(new THREE.BoxGeometry(INNER_W - 2, 0.35, 0.5), ledMat);
-    led.position.set(0, ceil - 0.25, DEPTH / 2 - 3.2); frame.add(led);
-    // halo chaud sur le fond et lumière sur la tablette
-    const glow = new THREE.Mesh(new THREE.PlaneGeometry(INNER_W - 0.2, GAP), glowMat);
-    glow.position.set(0, ceil - GAP * 0.38, -DEPTH / 2 + 1.3); frame.add(glow);
-    const pool = new THREE.Mesh(new THREE.PlaneGeometry(INNER_W - 0.2, DEPTH - 1.4), poolMat);
-    pool.rotation.x = -Math.PI / 2; pool.position.set(0, (i === 0 ? PLINTH : y + SHELF_T) + 0.06, 1); frame.add(pool);
+  const bodyH = cabH - FEET, midY = FEET + bodyH / 2;
+  // caisson noir
+  box(SIDE, bodyH, DEPTH, blackMat, -OUT_W / 2 + SIDE / 2, midY, 0);
+  box(SIDE, bodyH, DEPTH, blackMat, OUT_W / 2 - SIDE / 2, midY, 0);
+  box(OUT_W, 1.6, DEPTH, blackMat, 0, cabH - 0.8, 0);
+  box(OUT_W - SIDE * 2, 1.6, DEPTH, blackMat, 0, FEET + 0.8, 0);
+  box(OUT_W - SIDE * 2, bodyH, 1, interiorMat, 0, midY, -front + 0.5, false);
+  box(MID, bodyH, DEPTH - 2, blackMat, 0, midY, -1);
+  // pieds réglables
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+    const f = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 1.9, FEET, 16), steelMat);
+    f.position.set(sx * (OUT_W / 2 - 4), FEET / 2, sz * (front - 4)); frame.add(f);
   }
-  const blob = new THREE.Mesh(new THREE.PlaneGeometry(OUT_W * 2.1, DEPTH * 2.6), shadowBlobMat);
+  for (let d = 0; d < DOORS; d++) {
+    const cx = doorX(d);
+    // bandeau inox avec l'afficheur de température
+    box(INNER_W - 1, 6.4, 1, steelMat, cx, innerTop + 4.6, front - 4);
+    const lcd = new THREE.Mesh(new THREE.PlaneGeometry(9, 2.25), lcdMat);
+    lcd.position.set(cx, innerTop + 4.6, front - 3.45); frame.add(lcd);
+    for (const s of [-1, 1]) {
+      const spot = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.1, 0.4, 20), ledMat);
+      spot.position.set(cx + s * 15, innerTop + 1.2, front - 7); frame.add(spot);
+    }
+    // clayettes : plateau sombre, barre de façade en hêtre, barre d'appui pour les goulots
+    for (let i = 0; i < shelfCount; i++) {
+      const y = BASE + i * (SHELF_T + GAP), top = y + SHELF_T;
+      box(INNER_W, SHELF_T, DEPTH - 6, shelfMat, cx, y + SHELF_T / 2, -2);
+      box(INNER_W - 0.4, 2.6, 1.6, beechMat, cx, top - 0.1, front - 6.3);
+      box(INNER_W - 0.4, 0.7, 0.7, steelMat, cx, top + 19, -3.4, false);
+      const ceil = top + GAP;
+      const led = new THREE.Mesh(new THREE.BoxGeometry(INNER_W - 3, 0.3, 0.45), ledMat);
+      led.position.set(cx, (i === shelfCount - 1 ? innerTop : ceil) - 0.2, front - 8); frame.add(led);
+      const glow = new THREE.Mesh(new THREE.PlaneGeometry(INNER_W - 0.4, GAP), glowMat);
+      glow.position.set(cx, ceil - GAP * 0.42, -front + 1.1); frame.add(glow);
+      const pool = new THREE.Mesh(new THREE.PlaneGeometry(INNER_W - 0.4, DEPTH - 8), poolMat);
+      pool.rotation.x = -Math.PI / 2; pool.position.set(cx, top + 0.06, -1); frame.add(pool);
+    }
+    // compartiment du bas : clayette de stockage à barreaux
+    for (let r = 0; r < 3; r++) box(INNER_W - 0.4, 0.5, 0.5, steelMat, cx, FEET + 6 + r * 6, front - 7 - r * 2, false);
+    // porte : cadre noir + verre fumé
+    const x0 = cx - (INNER_W + MID) / 2 - (d === 0 ? SIDE - MID / 2 : -0.15);
+    const x1 = cx + (INNER_W + MID) / 2 + (d === DOORS - 1 ? SIDE - MID / 2 : -0.15);
+    const dw = x1 - x0, dh = cabH - FEET - 0.8, dcx = (x0 + x1) / 2, dcy = FEET + 0.4 + dh / 2, dz = front + 1.1, st = 2.8;
+    box(st, dh, 2.2, blackMat, x0 + st / 2, dcy, dz);
+    box(st, dh, 2.2, blackMat, x1 - st / 2, dcy, dz);
+    box(dw, st, 2.2, blackMat, dcx, cabH - 0.4 - st / 2, dz);
+    box(dw, st + 1, 2.2, blackMat, dcx, FEET + 0.4 + (st + 1) / 2, dz);
+    const glass = new THREE.Mesh(new THREE.PlaneGeometry(dw - st * 2 + 0.4, dh - st * 2 - 0.6), glassMat);
+    glass.position.set(dcx, dcy + 0.5, dz + 0.4); glass.renderOrder = 6; frame.add(glass);
+    // poignée et serrure côté centre
+    const hx = d === 0 ? x1 - st / 2 : x0 + st / 2;
+    box(0.6, 3, 1.2, steelMat, hx, cabH * 0.52, dz + 1.4, false);
+  }
+  const blob = new THREE.Mesh(new THREE.PlaneGeometry(OUT_W * 1.6, DEPTH * 2.4), shadowBlobMat);
   blob.rotation.x = -Math.PI / 2; blob.position.y = 0.05;
   frame.add(blob);
   root.add(frame);
@@ -363,10 +419,12 @@ export function setWines(list) {
   if (need !== shelfCount || !frame) { shelfCount = need; buildFrame(); }
   list.forEach(({ w }, i) => {
     const g = makeBottle(w);
+    // rangement ligne par ligne, du haut vers le bas, à travers les deux portes
     const comp = shelfCount - 1 - Math.floor(i / PER), k = i % PER;
-    const y = PLINTH + comp * (SHELF_T + GAP) + (comp === 0 ? 0 : SHELF_T);
-    g.position.set(-INNER_W / 2 + 0.8 + SLOT * (k + 0.5), y, 2.2);
-    g.rotation.y = (Math.sin(i * 12.9898) * 43758.5453 % 1) * 0.22;
+    const d = Math.floor(k / PER_DOOR), s = k % PER_DOOR;
+    const y = BASE + comp * (SHELF_T + GAP) + SHELF_T + 0.3;
+    g.position.set(doorX(d) - INNER_W / 2 + 0.8 + SLOT * (s + 0.5), y, BOTTLE_Z);
+    g.rotation.set(TILT, (Math.sin(i * 12.9898) * 43758.5453 % 1) * 0.06, 0);
     g.userData.idx = i;
     g.userData.home = { pos: g.position.clone(), rotY: g.rotation.y };
     g.userData.push = 0;
@@ -397,28 +455,38 @@ export function setFilter(fn) {
 
 /* ——————————————— Caméra ——————————————— */
 function overviewPose() {
-  const a = camera.aspect, portrait = a < 0.9;
-  // la cave occupe ~58 % de la hauteur, décalée à gauche
-  const dist = portrait ? 230 / (0.58 * 2 * TAN) * 0.92 : 230 / (0.62 * 2 * TAN);
+  const a = camera.aspect, portrait = a < 0.9, rot = 0.55;
+  // la cave entière, un peu au loin, décalée à gauche de l'écran
+  const span = OUT_W * Math.cos(rot) + DEPTH * Math.sin(rot);
+  const distW = span / ((portrait ? 0.68 : 0.42) * 2 * TAN * a);
+  const distH = cabH / ((portrait ? 0.6 : 0.72) * 2 * TAN);
+  const dist = Math.max(distW, distH);
+  const visW = 2 * dist * TAN * a, visH = 2 * dist * TAN;
+  const tx = (0.5 - (portrait ? 0.39 : 0.3)) * visW;
   return {
-    rot: 0.62,
-    pos: new THREE.Vector3(portrait ? 70 : 150, cabH * 0.8, dist),
-    tgt: new THREE.Vector3(portrait ? 30 : 75 * a * 0.62, cabH * (portrait ? 0.47 : 0.55), 0),
+    rot,
+    pos: new THREE.Vector3(tx + 40, cabH * 0.8, dist),
+    tgt: new THREE.Vector3(tx, cabH * 0.5 + visH * (portrait ? 0.012 : 0.02), 0),
   };
 }
-function viewH() {
-  const want = (OUT_W * 1.1) / camera.aspect;
-  return THREE.MathUtils.clamp(want, 112, cabH + 16);
+// Vue de la cave : assez près pour lire les étiquettes (≈ 8 px par cm à l'écran), on se déplace en glissant
+function viewW() {
+  return Math.min(OUT_W * 1.06, Math.max(44, canvasEl.clientWidth / 8));
+}
+function viewH() { return viewW() / camera.aspect; }
+function clampPanX(x) {
+  const lim = OUT_W / 2 + 1.5 - viewW() / 2;
+  return lim <= 0 ? 0 : THREE.MathUtils.clamp(x, -lim, lim);
 }
 function clampPan(y) {
   const vh = viewH();
-  const lo = vh / 2 - 6, hi = cabH - vh / 2 + 8;
+  const lo = vh / 2 + 2, hi = cabH - vh / 2 + 6;
   return lo > hi ? cabH / 2 : THREE.MathUtils.clamp(y, lo, hi);
 }
-function cabinetPose(y = panY) {
-  const vh = viewH();
-  const d = (vh / 2) / TAN;
-  return { rot: 0, pos: new THREE.Vector3(0, y, DEPTH / 2 + d), tgt: new THREE.Vector3(0, y, 0) };
+function cabinetPose(y = panY, x = panX) {
+  const d = (viewH() / 2) / TAN;
+  // légèrement au-dessus : les étiquettes inclinées se présentent face à nous
+  return { rot: 0, pos: new THREE.Vector3(x, y + d * 0.12, DEPTH / 2 + d), tgt: new THREE.Vector3(x, y - 3, 0) };
 }
 function applyPose(p) {
   root.rotation.y = p.rot;
@@ -446,8 +514,9 @@ export function toCabinet() {
   if (mode === "focus") return unfocus();
   mode = "to-cabinet";
   panY = clampPan(cabH);
-  const from = currentPose || overviewPose();
-  entering = tween(1.5, (e) => { currentPose = lerpPose(from, cabinetPose(), e); })
+  panX = clampPanX(-OUT_W);
+  const from = currentPose || overviewPose(), g0 = glassMat.opacity;
+  entering = tween(1.5, (e) => { currentPose = lerpPose(from, cabinetPose(), e); glassMat.opacity = g0 * (1 - e); })
     .then(() => { mode = "cabinet"; entering = null; });
   return entering;
 }
@@ -456,20 +525,20 @@ export async function toOverview() {
   if (mode !== "cabinet") return;
   mode = "to-overview";
   const from = currentPose;
-  await tween(1.4, (e) => { currentPose = lerpPose(from, overviewPose(), e); });
+  await tween(1.4, (e) => { currentPose = lerpPose(from, overviewPose(), e); glassMat.opacity = GLASS_OPACITY * e; });
   mode = "overview";
 }
 
 /* ——————————————— Focus bouteille ——————————————— */
 function focusTarget() {
   const wide = camera.aspect > 1.05;
-  const cam = camera.position;
+  camera.updateMatrixWorld();
   if (!wide) {
     const D = 30 / (0.76 * TAN), h = D * TAN;
-    return new THREE.Vector3(cam.x, cam.y + 0.42 * h - 15.5, cam.z - D);
+    return { D, pos: camera.localToWorld(new THREE.Vector3(0, 0.42 * h - 15.5, -D)) };
   }
   const D = 30 / (1.3 * TAN), h = D * TAN;
-  return new THREE.Vector3(cam.x - 0.3 * h * camera.aspect, cam.y - 15.5, cam.z - D);
+  return { D, pos: camera.localToWorld(new THREE.Vector3(-0.3 * h * camera.aspect, -15.5, -D)) };
 }
 function setDimSolid(solid) {
   // opaque une fois en place : le vin translucide « voit » alors ce fond crème
@@ -513,18 +582,17 @@ export async function focus(wineId, idx) {
   mode = "to-focus";
   // amener l'étagère dans le champ
   const wp = b.getWorldPosition(new THREE.Vector3());
-  const goal = clampPan(wp.y + 15);
-  if (Math.abs(goal - panY) > 4) {
-    const p0 = panY;
-    await tween(0.6, (e) => { panY = p0 + (goal - p0) * e; currentPose = cabinetPose(); });
+  const goal = clampPan(wp.y + 15), goalX = clampPanX(wp.x);
+  if (Math.abs(goal - panY) > 4 || Math.abs(goalX - panX) > 4) {
+    const p0 = panY, x0 = panX;
+    await tween(0.6, (e) => { panY = p0 + (goal - p0) * e; panX = x0 + (goalX - x0) * e; currentPose = cabinetPose(); });
   }
   applyPose(currentPose); camera.updateMatrixWorld();
   focused = b;
   scene.attach(b);
-  const start = b.position.clone(), r0 = b.rotation.y;
-  const end = focusTarget();
+  const start = b.position.clone(), r0 = b.rotation.y, t0 = b.rotation.x;
+  const { D, pos: end } = focusTarget();
   const ctrl = start.clone().add(new THREE.Vector3(0, 6, 26));
-  const D = camera.position.z - end.z;
   showDim(D);
   setLabelRes(b, HI_RES);
   attachShadow(b);
@@ -535,6 +603,7 @@ export async function focus(wineId, idx) {
     q.set(0, 0, 0).addScaledVector(start, u * u).addScaledVector(ctrl, 2 * u * e).addScaledVector(end, e * e);
     b.position.copy(q);
     b.rotation.y = r0 * (1 - e) + Math.sin(e * Math.PI) * 0.6;
+    b.rotation.x = t0 * (1 - e);
     dimPlane.material.opacity = e;
     focusShadow.material.opacity = Math.max(0, e * 1.6 - 0.6);
   });
@@ -559,13 +628,14 @@ export async function unfocus() {
     q.set(0, 0, 0).addScaledVector(start, u * u).addScaledVector(ctrl, 2 * u * e).addScaledVector(home, e * e);
     b.position.copy(q);
     b.rotation.y = r0 + (b.userData.home.rotY - r0) * e;
+    b.rotation.x = TILT * e;
     dimPlane.material.opacity = op * (1 - e);
     if (focusShadow) focusShadow.material.opacity = 1 - Math.min(1, e * 3);
   });
   if (focusShadow) b.remove(focusShadow);
   bottleRoot.attach(b);
   b.position.copy(b.userData.home.pos); b.position.z += b.userData.push || 0;
-  b.rotation.set(0, b.userData.home.rotY, 0);
+  b.rotation.set(TILT, b.userData.home.rotY, 0);
   setLabelRes(b, LOW_RES);
   hideDim(true);
   focused = null;
@@ -600,7 +670,7 @@ function bindPointer() {
   canvasEl.addEventListener("pointerdown", (e) => {
     p = { x: e.clientX, y: e.clientY, lx: e.clientX, ly: e.clientY, moved: false };
     canvasEl.setPointerCapture(e.pointerId);
-    panVel = 0; spinVel = 0;
+    panVel = 0; panVelX = 0; spinVel = 0;
   });
   canvasEl.addEventListener("pointermove", (e) => {
     if (!p) return;
@@ -610,7 +680,8 @@ function bindPointer() {
     if (!p.moved) return;
     if (mode === "cabinet") {
       const k = viewH() / canvasEl.clientHeight;
-      panY = clampPan(panY + dy * k); panVel = dy * k; dirty = true;
+      panY = clampPan(panY + dy * k); panVel = dy * k;
+      panX = clampPanX(panX - dx * k); panVelX = -dx * k; dirty = true;
     } else if (mode === "focus") {
       spin += dx * 0.012; spinVel = dx * 0.012; lastInteract = performance.now();
     }
@@ -625,7 +696,10 @@ function bindPointer() {
   canvasEl.addEventListener("wheel", (e) => {
     if (mode !== "cabinet") return;
     e.preventDefault();
-    panY = clampPan(panY - e.deltaY * viewH() / canvasEl.clientHeight * 0.6); dirty = true;
+    const k = viewH() / canvasEl.clientHeight * 0.6;
+    if (e.shiftKey && !e.deltaX) panX = clampPanX(panX + e.deltaY * k);
+    else { panY = clampPan(panY - e.deltaY * k); panX = clampPanX(panX + e.deltaX * k); }
+    dirty = true;
   }, { passive: false });
 }
 
@@ -650,7 +724,7 @@ function resize() {
   renderer.setSize(w, h, false);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
-  if (mode === "cabinet") { panY = clampPan(panY); currentPose = cabinetPose(); }
+  if (mode === "cabinet") { panY = clampPan(panY); panX = clampPanX(panX); currentPose = cabinetPose(); }
   dirty = true;
 }
 
@@ -671,6 +745,7 @@ function loop(now) {
     currentPose = p;
   } else if (mode === "cabinet") {
     if (Math.abs(panVel) > 0.01) { panVel *= 0.92; panY = clampPan(panY + panVel); dirty = true; }
+    if (Math.abs(panVelX) > 0.01) { panVelX *= 0.92; panX = clampPanX(panX + panVelX); dirty = true; }
     currentPose = cabinetPose();
   } else if (mode === "focus" && focused) {
     spinVel *= 0.94; spin += spinVel;
