@@ -28,10 +28,21 @@ function load() {
     const raw = localStorage.getItem(STORE_KEY);
     if (raw) {
       const s = JSON.parse(raw);
-      if (Array.isArray(s.wines)) return { wines: s.wines, history: s.history || [], seedHash: s.seedHash ?? SEED_HASH };
+      if (Array.isArray(s.wines)) return { wines: s.wines, history: normHistory(s.history), seedHash: s.seedHash ?? SEED_HASH };
     }
   } catch {}
   return fresh();
+}
+// Souvenirs : chaque bouteille bue garde sa fiche complète (pour la revoir en 3D), la date, avec qui, le contexte
+function normHistory(h) {
+  return (h || []).map((x) => {
+    if (x.wine) return { with: [], context: "", place: "", note: "", rating: 0, ...x, id: x.id || uid() };
+    const [app, cuvee] = String(x.name || "").split(" · ");
+    return {
+      id: x.id || uid(), date: x.date || new Date().toISOString(), with: [], context: "", place: "", note: "", rating: 0,
+      wine: { id: uid(), domaine: x.domaine || "", appellation: app || "", cuvee: cuvee || "", vintage: x.vintage ?? null, color: x.color || "R", region: "" },
+    };
+  });
 }
 function fresh() {
   return { wines: SEED.map((w) => ({ id: uid(), notes: "", ...structuredClone(w) })), history: [], seedHash: SEED_HASH };
@@ -91,8 +102,32 @@ function matchesQuery(w) {
   return norm(ui.q).split(/\s+/).every((t) => hay.includes(t));
 }
 
+const regionOf = (w) => w.region || appellationInfo(w.appellation)?.region || "";
+const parseDate = (s) => new Date(String(s).length === 10 ? s + "T12:00" : s);
+const cap1 = (t) => t.charAt(0).toUpperCase() + t.slice(1);
+const addedLabel = (w) => (w.added ? cap1(parseDate(w.added).toLocaleDateString("fr-FR", { month: "long", year: "numeric" })) : "Date inconnue");
+const today = () => { const d = new Date(); return new Date(d - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10); };
+const SORTS = { domaine: "domaine", millesime: "millésime", region: "région", obtention: "date d'obtention", couleur: "couleur", garde: "urgence" };
+// nom du groupe (= de la clayette) d'une bouteille selon le rangement choisi
+function groupLabel(w) {
+  switch (ui.sort) {
+    case "couleur": return COLORS[w.color].label + "s";
+    case "millesime": return w.vintage ? String(w.vintage) : "Non millésimé";
+    case "region": return regionOf(w) || "Région non renseignée";
+    case "obtention": return addedLabel(w);
+    case "garde": return { late: "À boire sans tarder", soon: "À boire cette année", ready: "Prêts à boire", young: "En garde", none: "Garde non renseignée" }[status(w).k];
+    default: return w.domaine;
+  }
+}
+function groupsOf(list) {
+  const g = new Map();
+  for (const w of list) { const k = groupLabel(w); if (!g.has(k)) g.set(k, []); g.get(k).push(w); }
+  return g;
+}
 function sorted(list) {
   const by = {
+    region: (a, b) => (regionOf(a) || "~").localeCompare(regionOf(b) || "~") || a.domaine.localeCompare(b.domaine) || (a.vintage || 9999) - (b.vintage || 9999),
+    obtention: (a, b) => (b.added || "").localeCompare(a.added || "") || a.domaine.localeCompare(b.domaine),
     domaine: (a, b) => a.domaine.localeCompare(b.domaine) || a.appellation.localeCompare(b.appellation) || (a.cuvee || "").localeCompare(b.cuvee || "") || (a.vintage || 9999) - (b.vintage || 9999),
     couleur: (a, b) => a.color.localeCompare(b.color) || a.domaine.localeCompare(b.domaine) || (a.vintage || 9999) - (b.vintage || 9999),
     millesime: (a, b) => (a.vintage || 9999) - (b.vintage || 9999) || a.domaine.localeCompare(b.domaine),
@@ -100,7 +135,30 @@ function sorted(list) {
   }[ui.sort];
   return [...list].sort(by);
 }
-const layout = () => sorted(state.wines).flatMap((w) => Array.from({ length: w.qty }, () => ({ w })));
+// pour la 3D : un groupe par clayette, une entrée par bouteille
+const layout = () => [...groupsOf(sorted(state.wines))].map(([label, ws]) => ({ label, items: ws.flatMap((w) => Array.from({ length: w.qty }, () => w)) }));
+
+/* ————————————————— Souvenirs ————————————————— */
+const memById = (id) => state.history.find((m) => m.id === id);
+const fmtShort = (s) => parseDate(s).toLocaleDateString("fr-FR", { day: "numeric", month: "short" }).replace(".", "");
+const fmtLong = (s) => cap1(parseDate(s).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" }));
+const yearOf = (m) => parseDate(m.date).getFullYear();
+// une étagère par année, la plus récente en haut ; dans l'année, de la plus ancienne à la plus récente
+function memRows() {
+  const byYear = new Map();
+  for (const m of [...state.history].sort((a, b) => parseDate(a.date) - parseDate(b.date))) {
+    const y = yearOf(m);
+    if (!byYear.has(y)) byYear.set(y, []);
+    byYear.get(y).push(m);
+  }
+  return [...byYear].sort((a, b) => b[0] - a[0]).map(([y, ms]) => ({ label: String(y), items: ms.map((m) => ({ id: m.id, w: m.wine, tag: fmtShort(m.date) })) }));
+}
+// les personnes déjà croisées, les plus fréquentes d'abord
+function knownPeople() {
+  const n = new Map();
+  for (const m of state.history) for (const p of m.with || []) n.set(p, (n.get(p) || 0) + 1);
+  return [...n].sort((a, b) => b[1] - a[1]).map(([p]) => p);
+}
 
 /* ————————————————— Navigation (bouton retour du téléphone) ————————————————— */
 const stack = [];
@@ -123,7 +181,7 @@ const mode = () => document.body.dataset.mode;
 async function loadPhotos() {
   try {
     const all = await Photos.all();
-    const ids = new Set(state.wines.filter((w) => w.photo).map((w) => w.id));
+    const ids = new Set([...state.wines, ...state.history.map((m) => m.wine)].filter((w) => w?.photo).map((w) => w.id));
     await Promise.all([...all].map(async ([id, blob]) => {
       if (!ids.has(id)) { await Photos.del(id); return; }
       try { PHOTOS.set(id, await Photos.blobToImage(blob)); } catch {}
@@ -138,13 +196,19 @@ async function boot() {
   try {
     S = await import("./scene.js");
     await S.init($("#scene"), {
-      onCabinetTap: enterCabinet,
+      labelsEl: $("#cab-labels"),
+      onCabinetTap: (c) => enterCabinet(c),
       onBottleTap: (id, idx) => openBottle(id, idx),
-      onBackgroundTap: () => { if (mode() === "bottle") back(); },
+      onMemoryTap: (id) => openMemory(id),
+      onBackgroundTap: () => { if (mode() === "bottle" || mode() === "memory") back(); },
+      onCabinets: renderCabNav,
+      onCabinet: (c) => $$("#cab-nav button").forEach((b) => b.classList.toggle("on", +b.dataset.c === c)),
     });
     await photosReady;
     S.setWines(layout());
     S.setFilter(matchesFilter);
+    S.setMemories(memRows());
+    renderMemBar();
     await new Promise((r) => setTimeout(r, 350));
     setMode("overview");
   } catch (e) {
@@ -155,18 +219,98 @@ async function boot() {
   checkSeed();
 }
 
-function refreshScene() {
+function refreshScene(animate = false) {
+  renderMemBar();
   if (!S) return;
-  S.setWines(layout());
+  S.setWines(layout(), { animate });
   S.setFilter(matchesFilter);
+  S.setMemories(memRows());
 }
 
-async function enterCabinet() {
+async function enterCabinet(c = 0) {
   if (!S || mode() !== "overview") return;
   setMode("cabinet");
   push(exitCabinet);
   showHint();
-  await S.toCabinet();
+  await S.toCabinet(c);
+}
+// Plusieurs caves : une pastille par cave pour voyager de l'une à l'autre
+function renderCabNav(list) {
+  const nav = $("#cab-nav");
+  nav.innerHTML = list.length > 1 ? list.map((c) => `
+    <button data-c="${c.c}"><b>${c.c + 1}</b><span>${esc(c.title)}</span></button>`).join("") : "";
+  nav.classList.toggle("multi", list.length > 1);
+}
+$("#cab-nav").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-c]");
+  if (b) S?.goToCabinet(+b.dataset.c);
+});
+$("#cab-labels").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-c]");
+  if (b) enterCabinet(+b.dataset.c);
+});
+
+// Ranger la cave : les bouteilles glissent jusqu'à leurs nouvelles clayettes
+function setSort(k) {
+  if (!SORTS[k] || ui.sort === k) return;
+  ui.sort = k;
+  $("#sort").value = k;
+  $$("#sort-pop button").forEach((b) => b.classList.toggle("on", b.dataset.sort === k));
+  renderList();
+  refreshScene(true);
+  toast(`Rangée par ${SORTS[k]}`);
+}
+const sortPop = $("#sort-pop");
+$("#btn-sort").onclick = (e) => { e.stopPropagation(); sortPop.classList.toggle("on"); };
+sortPop.addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-sort]");
+  if (!b) return;
+  sortPop.classList.remove("on");
+  setSort(b.dataset.sort);
+});
+document.addEventListener("pointerdown", (e) => { if (!e.target.closest("#sort-pop, #btn-sort")) sortPop.classList.remove("on"); });
+
+/* Cave des souvenirs */
+let memFrom = "overview";
+async function openMemories() {
+  if (!S) { openList("mem"); return; }
+  if (mode() !== "overview" && mode() !== "cabinet") return;
+  memFrom = mode();
+  sortPop.classList.remove("on");
+  renderMemBar();
+  setMode("memories");
+  push(closeMemories);
+  await S.toMemories();
+}
+function closeMemories() {
+  setMode(memFrom);
+  S?.leaveMemories();
+}
+function renderMemBar() {
+  const rows = memRows(), n = state.history.length;
+  $("#mem-count").textContent = n ? `${n} bouteille${n > 1 ? "s" : ""} partagée${n > 1 ? "s" : ""}` : "Aucune bouteille pour l'instant";
+  $("#mem-years").innerHTML = rows.length > 1 ? rows.map((r, i) => `<button data-row="${i}" class="${i ? "" : "on"}">${r.label}</button>`).join("") : "";
+  $("#mem-years").hidden = rows.length < 2;
+  $("#mem-empty").hidden = n > 0;
+}
+$("#mem-years").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-row]");
+  if (!b) return;
+  $$("#mem-years button").forEach((x) => x.classList.toggle("on", x === b));
+  S?.goToMemRow(+b.dataset.row);
+});
+async function openMemory(id) {
+  const m = memById(id);
+  if (!m || !S || mode() !== "memories") return;
+  renderMemoryDetail(m);
+  setMode("memory");
+  push(closeMemory);
+  await S.focusMemory(id);
+}
+let memDirty = false;
+function closeMemory() {
+  setMode("memories");
+  S?.unfocus().then(() => { if (memDirty) { memDirty = false; S.setMemories(memRows()); renderMemBar(); } });
 }
 function exitCabinet() {
   setMode("overview");
@@ -205,18 +349,16 @@ function renderStats() {
     <div><b>${n((w) => w.color === "B")}</b><span><i style="background:var(--blanc)"></i>blancs</span></div>
     <div><b>${n((w) => w.color === "R")}</b><span><i style="background:var(--rouge)"></i>rouges</span></div>
     <span class="sep"></span>
-    <div><b>${n(priority)}</b><span><i style="background:var(--warn)"></i>à boire vite</span></div>`;
+    <div><b>${n(priority)}</b><span><i style="background:var(--warn)"></i>à boire vite</span></div>
+    <div><b>${state.history.length}</b><span>souvenirs</span></div>`;
 }
 
+let listKind = "cave";
 function renderList() {
+  if (listKind === "mem") { renderMemList(); return; }
   const list = sorted(state.wines.filter((w) => matchesQuery(w)));
   if (!list.length) { $("#list").innerHTML = `<div class="empty-state">Aucune bouteille ne correspond.</div>`; return; }
-  const key = ui.sort === "couleur" ? (w) => COLORS[w.color].label + "s"
-    : ui.sort === "millesime" ? (w) => (w.vintage ? String(w.vintage) : "Non millésimé")
-    : ui.sort === "garde" ? (w) => ({ late: "À boire sans tarder", soon: "À boire cette année", ready: "Prêts à boire", young: "En garde", none: "Garde non renseignée" }[status(w).k])
-    : (w) => w.domaine;
-  const groups = new Map();
-  for (const w of list) { const k = key(w); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(w); }
+  const groups = groupsOf(list);
   let html = "";
   for (const [k, ws] of groups) {
     const n = ws.reduce((s, w) => s + w.qty, 0);
@@ -228,6 +370,31 @@ function renderList() {
         <div><div class="t">${esc(fullName(w))}</div>
           <div class="s">${ui.sort === "domaine" ? "" : `<span>${esc(w.domaine)}</span>`}<span class="pill st-${st.k}">${esc(st.t.split(" · ")[0])}</span></div></div>
         <div class="r"><div class="y">${esc(vintageTxt(w))}</div><div class="q">× ${w.qty}</div></div>
+      </button>`;
+    }
+    html += `</div>`;
+  }
+  $("#list").innerHTML = html;
+}
+function renderMemList() {
+  const q = norm(ui.q).split(/\s+/).filter(Boolean);
+  const list = [...state.history].sort((a, b) => parseDate(b.date) - parseDate(a.date)).filter((m) => {
+    const w = m.wine, hay = norm([w.domaine, w.appellation, w.cuvee, w.vintage, ...(m.with || []), m.context, m.place, m.note, yearOf(m)].join(" "));
+    return q.every((t) => hay.includes(t));
+  });
+  if (!list.length) { $("#list").innerHTML = `<div class="empty-state">${state.history.length ? "Aucun souvenir ne correspond." : "Les bouteilles débouchées viendront ici."}</div>`; return; }
+  const groups = new Map();
+  for (const m of list) { const y = yearOf(m); if (!groups.has(y)) groups.set(y, []); groups.get(y).push(m); }
+  let html = "";
+  for (const [y, ms] of groups) {
+    html += `<div class="group"><h3>${y}<small>${ms.length} bouteille${ms.length > 1 ? "s" : ""}</small></h3>`;
+    for (const m of ms) {
+      const w = m.wine, who = (m.with || []).join(", ");
+      html += `<button class="card mem-card" data-mem="${m.id}">
+        <span class="bar" style="background:${COLORS[w.color]?.dot}"></span>
+        <div><div class="t">${esc(fullName(w))} <span class="v">${esc(vintageTxt(w))}</span></div>
+          <div class="s"><span>${esc(w.domaine)}</span>${who ? `<span>avec ${esc(who)}</span>` : ""}${m.context ? `<span>${esc(m.context)}</span>` : ""}</div></div>
+        <div class="r"><div class="d">${esc(fmtShort(m.date))}</div>${m.rating ? `<div class="q">${"★".repeat(m.rating)}</div>` : ""}</div>
       </button>`;
     }
     html += `</div>`;
@@ -290,8 +457,58 @@ function renderDetail(w) {
   $("#d-close").onclick = () => back();
   $("#d-back").onclick = () => back();
   $("#d-edit").onclick = () => openForm(w);
-  $("#d-drink").onclick = () => drink(w);
+  $("#d-drink").onclick = () => openDrinkForm(w);
 }
+
+// Fiche d'un souvenir (bouteille vide du mur des souvenirs)
+function renderMemoryDetail(m) {
+  const w = m.wine, d = $("#detail"), who = m.with || [];
+  d.innerHTML = `
+    <button class="round close" id="d-close" aria-label="Fermer">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
+    </button>
+    <span class="kicker rise">${esc(w.domaine)}</span>
+    <h2 class="d-title rise" style="animation-delay:.05s">${esc(title(w))}</h2>
+    <div class="d-sub rise" style="animation-delay:.1s">${esc(subtitle(w))}</div>
+    <div class="tags rise" style="animation-delay:.15s">
+      <span class="tag"><i style="background:${COLORS[w.color]?.dot}"></i>${COLORS[w.color]?.label || ""}</span>
+      <span class="tag">${w.vintage ? "Millésime " + esc(w.vintage) : "Non millésimé"}</span>
+      ${regionOf(w) ? `<span class="tag">${esc(regionOf(w))}</span>` : ""}
+    </div>
+    <div class="block mem-when rise" style="animation-delay:.2s">
+      <span class="lbl">Débouchée le</span>
+      <b>${esc(fmtLong(m.date))}</b>
+      ${m.rating ? `<div class="stars-ro" aria-label="${m.rating} sur 5">${[1, 2, 3, 4, 5].map((i) => `<i class="${i <= m.rating ? "on" : ""}">★</i>`).join("")}</div>` : ""}
+    </div>
+    <div class="block rise" style="animation-delay:.25s">
+      <div class="mem-row"><span class="lbl">Avec</span>
+        ${who.length ? `<div class="people">${who.map((p) => `<span class="person"><i>${esc(initials(p))}</i>${esc(p)}</span>`).join("")}</div>` : `<em class="none">Non renseigné</em>`}
+      </div>
+      <div class="mem-row"><span class="lbl">Contexte</span>
+        ${m.context || m.place ? `<div class="ctx">${m.context ? `<span class="tag">${esc(m.context)}</span>` : ""}${m.place ? `<span class="place">${esc(m.place)}</span>` : ""}</div>` : `<em class="none">Non renseigné</em>`}
+      </div>
+    </div>
+    ${m.note ? `<div class="block rise" style="animation-delay:.3s"><div class="block-h"><span>Souvenir</span></div><p class="mem-note">${esc(m.note)}</p></div>` : ""}
+    <div class="btn-row rise" style="animation-delay:.35s">
+      <button class="btn btn-ghost" id="m-edit">Modifier le souvenir</button>
+      <button class="btn btn-ghost" id="m-del">Supprimer</button>
+    </div>`;
+  d.scrollTop = 0;
+  $("#d-close").onclick = () => back();
+  $("#m-edit").onclick = () => openDrinkForm(null, m);
+  $("#m-del").onclick = () => {
+    if (!confirm("Supprimer ce souvenir ?")) return;
+    const snapshot = structuredClone(state);
+    state.history = state.history.filter((x) => x.id !== m.id);
+    save();
+    neutralizeTop();
+    back(() => {
+      setMode("memories");
+      S?.unfocus().then(() => { renderAll(); toast("Souvenir supprimé", { label: "Annuler", fn: () => { state = snapshot; save(); renderAll(); } }); });
+    });
+  };
+}
+const initials = (p) => p.split(/[\s-]+/).filter(Boolean).slice(0, 2).map((x) => x[0]).join("").toUpperCase();
 
 function renderAll() {
   renderStats();
@@ -300,11 +517,12 @@ function renderAll() {
 }
 
 /* ————————————————— Actions ————————————————— */
-async function drink(w) {
+async function drink(w, memo = {}) {
   const snapshot = structuredClone(state);
   w.qty -= 1;
-  state.history.unshift({ name: fullName(w), domaine: w.domaine, vintage: w.vintage, color: w.color, date: new Date().toISOString() });
-  state.history = state.history.slice(0, 200);
+  const { qty, notes, garde, ...wine } = w;
+  state.history.unshift({ id: uid(), date: memo.date || today(), with: memo.with || [], context: memo.context || "", place: memo.place || "", note: memo.note || "", rating: memo.rating || 0, wine: structuredClone(wine) });
+  state.history = state.history.slice(0, 3000);
   if (w.qty <= 0) state.wines = state.wines.filter((x) => x.id !== w.id);
   save();
   neutralizeTop();
@@ -312,7 +530,7 @@ async function drink(w) {
   setMode("cabinet");
   await S?.dropFocused();
   renderAll();
-  toast(`Santé ! ${esc(title(w))} ${esc(vintageTxt(w))}`, {
+  toast(`Santé ! ${esc(title(w))} ${esc(vintageTxt(w))} rejoint vos souvenirs`, {
     label: "Annuler",
     fn: () => { state = snapshot; save(); renderAll(); toast("Bouteille remise en cave"); },
   });
@@ -351,6 +569,66 @@ function toast(msg, action) {
   t.classList.add("on");
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => t.classList.remove("on"), action ? 5500 : 2400);
+}
+
+/* ————————————————— Déboucher : avec qui, contexte, date ————————————————— */
+const CONTEXTS = ["Dîner", "Déjeuner", "Apéritif", "En famille", "Entre amis", "En amoureux", "Anniversaire", "Fête", "Restaurant", "Dégustation"];
+function openDrinkForm(w, m = null) {
+  const edit = !!m, wine = edit ? m.wine : w;
+  let rating = m?.rating || 0, context = m?.context || "";
+  const people = knownPeople().slice(0, 14);
+  openSheet(`
+    <form class="form" id="dk">
+      <h2>${edit ? "Le souvenir" : "Déboucher"}</h2>
+      <p class="dk-wine"><span>${esc(wine.domaine)}</span>${esc(fullName(wine))} · ${esc(vintageTxt(wine))}</p>
+      <div class="field"><label>Date</label><input type="date" name="date" required value="${esc((m?.date || today()).slice(0, 10))}" max="${today()}"></div>
+      <div class="field"><label>Avec qui</label>
+        <input name="with" value="${esc((m?.with || []).join(", "))}" placeholder="Prénoms, séparés par des virgules" autocomplete="off">
+        ${people.length ? `<div class="pick" id="dk-people">${people.map((p) => `<button type="button" data-p="${esc(p)}">${esc(p)}</button>`).join("")}</div>` : ""}
+      </div>
+      <div class="field"><label>Contexte</label>
+        <div class="pick" id="dk-ctx">${CONTEXTS.map((c) => `<button type="button" data-c="${c}" class="${c === context ? "on" : ""}">${c}</button>`).join("")}</div>
+        <input name="place" value="${esc(m?.place || "")}" placeholder="Lieu, plat, occasion… (facultatif)" autocomplete="off">
+      </div>
+      <div class="field"><label>Appréciation</label>
+        <div class="stars" id="dk-stars">${[1, 2, 3, 4, 5].map((i) => `<button type="button" data-r="${i}" aria-label="${i} sur 5">★</button>`).join("")}</div>
+      </div>
+      <div class="field"><label>Souvenir <span style="color:var(--faint)">(facultatif)</span></label>
+        <textarea name="note" rows="3" placeholder="Ce qu'on a mangé, ce qu'on a ressenti…">${esc(m?.note || "")}</textarea>
+      </div>
+      <button class="btn btn-wine mt" type="submit">${edit ? "Enregistrer" : `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 3h8l-.6 6a3.4 3.4 0 0 1-6.8 0zM12 13v7M8.5 21h7"/></svg> Déboucher et garder le souvenir`}</button>
+    </form>`);
+  const f = $("#dk"), withIn = f.elements.with;
+  const names = () => withIn.value.split(",").map((x) => x.trim()).filter(Boolean);
+  const syncPeople = () => { const n = names(); $$("#dk-people button", f).forEach((b) => b.classList.toggle("on", n.includes(b.dataset.p))); };
+  $$("#dk-people button", f).forEach((b) => (b.onclick = () => {
+    const n = names(), p = b.dataset.p;
+    withIn.value = (n.includes(p) ? n.filter((x) => x !== p) : [...n, p]).join(", ");
+    syncPeople();
+  }));
+  withIn.addEventListener("input", syncPeople);
+  syncPeople();
+  $$("#dk-ctx button", f).forEach((b) => (b.onclick = () => {
+    context = context === b.dataset.c ? "" : b.dataset.c;
+    $$("#dk-ctx button", f).forEach((x) => x.classList.toggle("on", x.dataset.c === context));
+  }));
+  const paint = () => $$("#dk-stars button", f).forEach((b) => b.classList.toggle("on", +b.dataset.r <= rating));
+  $$("#dk-stars button", f).forEach((b) => (b.onclick = () => { rating = rating === +b.dataset.r ? 0 : +b.dataset.r; paint(); }));
+  paint();
+  f.onsubmit = (e) => {
+    e.preventDefault();
+    const fd = new FormData(f);
+    const memo = { date: fd.get("date") || today(), with: names(), context, place: fd.get("place").trim(), rating, note: fd.get("note").trim() };
+    if (edit) {
+      Object.assign(m, memo);
+      save();
+      // la bouteille est sortie : le mur sera reconstruit quand elle reprendra sa place
+      memDirty = true;
+      back(() => { renderMemoryDetail(m); renderList(); renderMemBar(); toast("Souvenir enregistré"); });
+    } else {
+      back(() => drink(w, memo));
+    }
+  };
 }
 
 /* ————————————————— Recadrage de l'étiquette ————————————————— */
@@ -497,7 +775,7 @@ function cropLabel(file) {
 /* ————————————————— Formulaire ————————————————— */
 function openForm(w) {
   const isNew = !w;
-  const d = w || { domaine: "", appellation: "", cuvee: "", vintage: YEAR - 2, color: "R", qty: 1, region: "", garde: null, notes: "" };
+  const d = w || { domaine: "", appellation: "", cuvee: "", vintage: YEAR - 2, color: "R", qty: 1, region: "", garde: null, notes: "", added: today() };
   let color = d.color, qty = d.qty;
   // étiquette : null = inchangée, "remove" = retirée, { canvas, ratio } = nouvelle photo recadrée
   let photo = null;
@@ -530,6 +808,7 @@ function openForm(w) {
           <button type="button" data-c="R" class="${color === "R" ? "on" : ""}"><i style="background:var(--rouge)"></i>Rouge</button>
         </div>
       </div>
+      <div class="field"><label>Date d'obtention</label><input name="added" type="date" value="${esc(d.added || "")}" max="${today()}"></div>
       <div class="field"><label>Forme de la bouteille</label>
         <select name="bottle" id="f-bottle">
           <option value="">Automatique</option>
@@ -616,6 +895,7 @@ function openForm(w) {
       vintage: num(fd.get("vintage")), region: fd.get("region").trim(), color, qty,
       garde: g0 && g1 ? [Math.min(g0, g1), Math.max(g0, g1)] : null,
       bottle: fd.get("bottle") || null,
+      added: fd.get("added") || null,
     };
     const id = isNew ? uid() : w.id;
     // la photo est rangée sur l'appareil (IndexedDB), la fiche ne garde que sa version et ses proportions
@@ -663,7 +943,7 @@ function openSettings() {
       <button class="btn btn-danger" id="s-reset">Revenir à l'inventaire initial</button>
       <div class="history">
         <h4>Dernières bouteilles ouvertes</h4>
-        ${h.length ? `<ul>${h.map((x) => `<li><span>${esc(x.name)} ${esc(x.vintage || "")}<br><small style="color:var(--faint)">${esc(x.domaine)}</small></span><span>${new Date(x.date).toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric" })}</span></li>`).join("")}</ul>` : `<p>Aucune pour l'instant.</p>`}
+        ${h.length ? `<ul>${h.map((x) => `<li><span>${esc(fullName(x.wine))} ${esc(x.wine.vintage || "")}<br><small style="color:var(--faint)">${esc(x.wine.domaine)}${x.with?.length ? " · avec " + esc(x.with.join(", ")) : ""}</small></span><span>${parseDate(x.date).toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric" })}</span></li>`).join("")}</ul>` : `<p>Aucune pour l'instant.</p>`}
       </div>
     </div>`);
 
@@ -691,7 +971,7 @@ function openSettings() {
     try {
       const data = JSON.parse(await file.text());
       if (!Array.isArray(data.wines)) throw new Error();
-      state = { wines: data.wines.map((w) => ({ id: w.id || uid(), notes: "", ...w })), history: data.history || [], seedHash: SEED_HASH };
+      state = { wines: data.wines.map((w) => ({ id: w.id || uid(), notes: "", ...w })), history: normHistory(data.history), seedHash: SEED_HASH };
       for (const [id, url] of Object.entries(data.labels || {})) {
         try { const b = await Photos.dataURLToBlob(url); await Photos.put(id, b); PHOTOS.set(id, await Photos.blobToImage(b)); } catch {}
       }
@@ -707,27 +987,39 @@ function openSettings() {
 }
 
 /* ————————————————— Inventaire ————————————————— */
-function openList() {
-  if (mode() === "fallback") return;
+function openList(kind) {
+  listKind = kind || (mode() === "memories" ? "mem" : "cave");
+  $("#list-title").textContent = listKind === "mem" ? "Souvenirs" : "Inventaire";
+  $("#q").placeholder = listKind === "mem" ? "Vin, personne, occasion, année…" : "Domaine, appellation, millésime…";
+  $(".sort").hidden = listKind === "mem";
+  renderList();
+  if (mode() === "fallback") { if (kind) toast("Souvenirs : " + state.history.length); return; }
   $("#list-panel").classList.add("on");
-  push(() => $("#list-panel").classList.remove("on"));
+  push(() => { $("#list-panel").classList.remove("on"); listKind = "cave"; });
 }
-$("#btn-list").onclick = openList;
+$("#btn-list").onclick = () => openList();
 $("#btn-list-close").onclick = () => back();
 $("#list").addEventListener("click", (e) => {
   const c = e.target.closest(".card");
   if (!c) return;
+  if (c.dataset.mem) { back(() => openMemory(c.dataset.mem)); return; }
   if (mode() === "fallback") { const w = byId(c.dataset.id); if (w) openForm(w); return; }
   back(() => openBottle(c.dataset.id));
 });
 $("#q").addEventListener("input", (e) => { ui.q = e.target.value.trim(); renderList(); });
-$("#sort").addEventListener("change", (e) => { ui.sort = e.target.value; renderList(); refreshScene(); });
+$("#sort").addEventListener("change", (e) => setSort(e.target.value));
 
 /* ————————————————— Événements ————————————————— */
-$("#btn-enter").onclick = enterCabinet;
+$("#btn-enter").onclick = () => enterCabinet(0);
 $("#btn-back").onclick = () => back();
 $("#btn-add").onclick = () => openForm(null);
 $("#btn-settings").onclick = openSettings;
+$("#tab-cave").onclick = () => {
+  if (mode() === "memories") back();
+  else if (mode() === "memory") back(() => back());
+};
+$("#tab-mem").onclick = () => openMemories();
+$("#btn-mem-back").onclick = () => back();
 $("#filters").addEventListener("click", (e) => {
   const b = e.target.closest("button[data-filter]");
   if (!b) return;

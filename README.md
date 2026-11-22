@@ -4,7 +4,20 @@ Petite appli (PWA) pour visualiser la cave à vin depuis un téléphone : cave e
 
 - Touchez la cave (ou « Entrer dans la cave ») : elle pivote face à vous et la porte vitrée s'efface.
 - Glissez dans tous les sens pour parcourir les clayettes des deux portes (la vue est assez proche pour lire les étiquettes), touchez une bouteille : elle sort et vient devant vous.
-- Glissez à gauche / droite pour la faire tourner ; « Déboucher » la retire de la cave.
+- Glissez à gauche / droite pour la faire tourner ; « Déboucher » la retire de la cave et l'envoie dans les Souvenirs.
+
+## Plusieurs caves et rangement
+
+- Quand les bouteilles ne tiennent plus dans une cave, une nouvelle cave apparaît à côté (60 bouteilles par cave).
+- Vue d'ensemble : touchez le nom d'une cave pour y entrer. Dans une cave, les pastilles en bas permettent de voyager de l'une à l'autre.
+- Bouton ⇅ : ranger par domaine, millésime, région, date d'obtention, couleur ou urgence. Les bouteilles glissent jusqu'à leurs nouvelles clayettes, chaque groupe a son étiquette sur l'étagère.
+- La **date d'obtention** se règle dans la fiche de chaque bouteille.
+
+## Souvenirs
+
+- Onglet **Souvenirs** : un mur avec une étagère par année, où se rangent les bouteilles bues (la plus récente en haut, la date gravée sous chaque bouteille).
+- En débouchant une bouteille : la date, avec qui, le contexte, le lieu, une note sur 5 et un petit texte.
+- Touchez une bouteille du mur pour revoir le souvenir, le modifier ou le supprimer. **Liste** montre tous les souvenirs par année.
 
 ## Fichiers
 
@@ -62,7 +75,7 @@ git push
 Le site se met à jour 1 à 2 minutes après le push. Sur le téléphone, fermer puis rouvrir l'appli pour voir la nouvelle version.
 
 Si la liste de bouteilles de `js/data.js` a changé, l'appli propose « La liste de la cave a été mise à jour → Charger ».
-**Charger remplace les bouteilles du téléphone** par celles du fichier. L'historique des bouteilles ouvertes est gardé.
+**Charger remplace les bouteilles du téléphone** par celles du fichier. Les souvenirs (bouteilles ouvertes) sont gardés.
 
 ## Installer sur le téléphone
 
