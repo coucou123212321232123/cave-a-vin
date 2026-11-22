@@ -52,20 +52,33 @@ const mats = {};
 let envTex, glassEnv;
 
 /* ——————————————— Géométries ——————————————— */
+// Bourguignonne : profil relevé sur une vraie bouteille Chanzy (hauteur cm, rayon cm) — longues épaules en pente douce
+const BURGUNDY_SHOULDER = [
+  [11.17, 3.99], [11.74, 3.955], [12.3, 3.889], [12.87, 3.81], [13.43, 3.718], [14.0, 3.599], [14.56, 3.468],
+  [15.12, 3.31], [15.69, 3.126], [16.25, 2.928], [16.82, 2.731], [17.38, 2.521], [17.95, 2.323], [18.51, 2.126],
+  [19.07, 1.968], [19.64, 1.823], [20.2, 1.718], [20.77, 1.613], [21.33, 1.534], [21.9, 1.481], [22.46, 1.455],
+  [23.03, 1.44], [23.6, 1.43],
+];
+// Jurassienne : corps plus étroit et plus haut, épaule haute et arrondie, long col
 const SHAPES = {
-  burgundy: { R: 4.02, body: 13.6, neck: 23.4, RN: 1.45, top: 30 },
-  jura: { R: 3.92, body: 15.4, neck: 22.6, RN: 1.42, top: 30.8 },
+  burgundy: { R: 4.0, body: 10.9, neck: 23.6, RN: 1.43, top: 29.6, profile: BURGUNDY_SHOULDER },
+  jura: { R: 3.78, body: 17.2, neck: 22.9, RN: 1.42, top: 30.6 },
 };
 
 function outline(type) {
   const s = SHAPES[type], p = [];
   p.push(V(0, 1.7), V(1.3, 1.3), V(2.7, 0.35), V(s.R - 0.4, 0), V(s.R - 0.06, 0.14), V(s.R, 0.55), V(s.R, s.body));
-  const n = 30;
-  for (let i = 1; i <= n; i++) {
-    const t = i / n;
-    const e = type === "jura" ? Math.pow(t, 0.8) : t;
-    const r = s.RN + (s.R - s.RN) * (1 + Math.cos(Math.PI * e)) / 2;
-    p.push(V(r, s.body + t * (s.neck - s.body)));
+  if (s.profile) {
+    for (const [h, r] of s.profile) p.push(V(r, h));
+  } else {
+    const n = 30;
+    for (let i = 1; i <= n; i++) {
+      const t = i / n;
+      // épaule arrondie : le rayon reste plein un moment puis plonge vers le col
+      const e = Math.pow(t, 1.35);
+      const r = s.RN + (s.R - s.RN) * (1 + Math.cos(Math.PI * e)) / 2;
+      p.push(V(r, s.body + t * (s.neck - s.body)));
+    }
   }
   p.push(V(s.RN - 0.04, s.top - 2.6), V(s.RN + 0.02, s.top - 0.9));
   p.push(V(s.RN + 0.2, s.top - 0.78), V(s.RN + 0.2, s.top - 0.06), V(s.RN + 0.06, s.top), V(0, s.top));
@@ -207,7 +220,7 @@ function makeBottle(w) {
   cap.castShadow = true;
   g.add(cap);
   const tex = labelTexture(w, LOW_RES);
-  const labelMat = new THREE.MeshStandardMaterial({ map: tex, bumpMap: tex, bumpScale: 0.6, roughness: 0.78, metalness: 0, envMapIntensity: 0.5 });
+  const labelMat = new THREE.MeshStandardMaterial({ map: tex, bumpMap: tex, bumpScale: 0.6, roughness: 0.78, metalness: 0, envMapIntensity: 0.5, alphaTest: st.label.cutout ? 0.5 : 0 });
   const label = new THREE.Mesh(labelGeo(t, st.label.arc, st.label.h), labelMat);
   label.position.y = st.label.y;
   label.renderOrder = 3;
@@ -386,8 +399,9 @@ export async function init(canvas, callbacks) {
   // Fond de studio crème derrière la bouteille sélectionnée (léger dégradé)
   const bd = document.createElement("canvas"); bd.width = bd.height = 512;
   const bx = bd.getContext("2d");
-  const bg = bx.createRadialGradient(256, 210, 20, 256, 256, 380);
-  bg.addColorStop(0, "#fbf8f2"); bg.addColorStop(0.55, "#f3ede3"); bg.addColorStop(1, "#e6dccd");
+  // même ambiance que l'intérieur de la cave : fond sombre, halo chaud derrière la bouteille
+  const bg = bx.createRadialGradient(256, 212, 10, 256, 236, 360);
+  bg.addColorStop(0, "#9a8468"); bg.addColorStop(0.22, "#5d4f41"); bg.addColorStop(0.5, "#2a2420"); bg.addColorStop(0.8, "#161413"); bg.addColorStop(1, "#0e0e0f");
   bx.fillStyle = bg; bx.fillRect(0, 0, 512, 512);
   const bdTex = new THREE.CanvasTexture(bd); bdTex.colorSpace = THREE.SRGBColorSpace;
   dimPlane = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: bdTex, transparent: true, opacity: 0, depthWrite: false, toneMapped: false, fog: false }));

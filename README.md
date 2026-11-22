@@ -15,6 +15,7 @@ Petite appli (PWA) pour visualiser la cave à vin depuis un téléphone : cave e
 | `js/scene.js` | Scène 3D (cave, bouteilles, caméra) |
 | `js/app.js` | Interface, fiches, inventaire, sauvegardes |
 | `css/styles.css` | Thème et animations |
+| `assets/` | Vraies étiquettes Chanzy (photos de chanzy.com mises à plat), blason et logo |
 
 Une bouteille d'un domaine inconnu reçoit une étiquette sobre générique. Pour lui faire une étiquette dédiée, ajouter une entrée dans `STYLES` de `js/labels.js`.
 
@@ -60,3 +61,4 @@ Après la première ouverture, l'appli fonctionne hors-ligne.
 - Réglages → **Exporter** pour sauvegarder / transférer vers un autre téléphone, **Importer** pour restaurer.
 - L'inventaire de départ est dans `js/data.js`.
 - Les fenêtres de dégustation sont indicatives et modifiables dans chaque fiche.
+- La garde maximale (en années après le millésime) est une estimation selon l'appellation, réglable dans `gardeMax()` de `js/app.js`.

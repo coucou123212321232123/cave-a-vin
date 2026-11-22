@@ -1,5 +1,5 @@
 // Service worker : l'application fonctionne hors-ligne une fois ouverte.
-const VERSION = "cave-v2";
+const VERSION = "cave-v3";
 const SHELL = [
   "./",
   "index.html",
@@ -8,6 +8,13 @@ const SHELL = [
   "js/data.js",
   "js/scene.js",
   "js/labels.js",
+  "assets/chanzy-crest.png",
+  "assets/chanzy-wordmark.png",
+  "assets/chanzy-clous.webp",
+  "assets/chanzy-corderes.webp",
+  "assets/chanzy-fortune.webp",
+  "assets/chanzy-fortune-vv.webp",
+  "assets/chanzy-clos-du-roy.webp",
   "manifest.webmanifest",
   "icons/icon.svg",
   "icons/icon-192.png",
@@ -36,7 +43,7 @@ self.addEventListener("fetch", (e) => {
   if (sameOrigin) {
     // Réseau d'abord (mises à jour), cache en secours
     e.respondWith(
-      fetch(req).then((res) => {
+      fetch(req, { cache: "no-cache" }).then((res) => {
         const copy = res.clone();
         caches.open(VERSION).then((c) => c.put(req, copy));
         return res;

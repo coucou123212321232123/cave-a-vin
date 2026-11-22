@@ -8,12 +8,38 @@ export const F = {
   sans: '"Inter", Arial, sans-serif',
 };
 
+// Images officielles (site de la Maison Chanzy) : blason découpé et logotype
+const IMG = {};
+// Vraies étiquettes Chanzy, photographiées sur chanzy.com puis « déroulées » à plat.
+// h / y en cm (hauteur totale blason compris, centre au-dessus du fond de la bouteille)
+const CHANZY_PHOTOS = {
+  "clous": { h: 8.37, y: 6.2 },
+  "corderes": { h: 8.29, y: 6.21 },
+  "fortune": { h: 8.76, y: 6.52 },
+  "fortune-vv": { h: 8.37, y: 6.15 },
+  "clos-du-roy": { h: 8.77, y: 6.43 },
+};
+function chanzyPhoto(w) {
+  const c = norm(w.cuvee);
+  if (c.includes("clous")) return "clous";
+  if (c.includes("corderes")) return "corderes";
+  if (c.includes("fortune")) return c.includes("vieilles") ? "fortune-vv" : "fortune";
+  if (c.includes("clos du roy") && w.color !== "R") return "clos-du-roy";
+  return null;
+}
+function loadImg(k, src) {
+  return new Promise((r) => { const i = new Image(); i.onload = () => { IMG[k] = i; r(); }; i.onerror = () => r(); i.src = src; });
+}
+
 export async function loadFonts() {
   const specs = [
     `600 40px ${F.serif}`, `700 40px ${F.serif}`, `italic 500 40px ${F.serif}`,
-    `500 40px ${F.caps}`, `700 40px ${F.caps}`, `400 40px ${F.script}`, `500 20px ${F.sans}`, `600 20px ${F.sans}`,
+    `500 40px ${F.caps}`, `700 40px ${F.caps}`, `400 40px ${F.script}`,
+    `300 20px ${F.sans}`, `400 20px ${F.sans}`, `500 20px ${F.sans}`, `600 20px ${F.sans}`,
   ];
-  try { await Promise.race([Promise.all(specs.map((s) => document.fonts.load(s))), new Promise((r) => setTimeout(r, 2500))]); } catch {}
+  const imgs = [loadImg("crest", "assets/chanzy-crest.png"), loadImg("wordmark", "assets/chanzy-wordmark.png"),
+    ...Object.keys(CHANZY_PHOTOS).map((k) => loadImg("chanzy-" + k, `assets/chanzy-${k}.webp`))];
+  try { await Promise.race([Promise.all([...specs.map((s) => document.fonts.load(s)), ...imgs]), new Promise((r) => setTimeout(r, 3000))]); } catch {}
 }
 
 const norm = (s) => String(s ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
@@ -137,6 +163,8 @@ function engraving(x, W, top, bottom, color) {
   x.restore();
 }
 
+function chanzyFallback(x, W, H, w) { return STYLES.chanzyOld.draw(x, W, H, w); }
+
 /* ——————————— styles par domaine ——————————— */
 const BLUE_INK = "#2c4a86";
 
@@ -146,7 +174,62 @@ const STYLES = {
     habit: (w) => w.color === "R"
       ? { bottle: "burgundy", glass: "dark", capsule: { color: "#141414", metal: .3, rough: .45 } }
       : { bottle: "burgundy", glass: "flint", wine: "#ebd98a", capsule: { color: "#ede7d8", metal: .1, rough: .5 } },
-    label: { arc: 175, h: 11.2, y: 9.4 },
+    // étiquette blanche texturée, blason découpé qui dépasse au-dessus (comme les vraies bouteilles)
+    label: (w) => {
+      const k = chanzyPhoto(w);
+      return k ? { arc: 148, h: CHANZY_PHOTOS[k].h, y: CHANZY_PHOTOS[k].y, cutout: true } : { arc: 175, h: 9.6, y: 6.9, cutout: true };
+    },
+    draw(x, W, H, w) {
+      const photo = IMG["chanzy-" + chanzyPhoto(w)];
+      if (photo) { x.drawImage(photo, 0, 0, W, H); return; }
+      const u = H / 100, cx = W / 2, band = 15 * u;
+      if (!IMG.crest || !IMG.wordmark) return chanzyFallback(x, W, H, w);
+      x.save(); x.translate(0, band); paper(x, W, H - band, "#fbfaf6", .05); x.restore();
+      // blason : la ligne 156/330 de l'image correspond au bord haut de l'étiquette
+      const ch = band * 330 / 156, cw = ch * IMG.crest.width / IMG.crest.height;
+      x.drawImage(IMG.crest, cx - cw / 2, 0, cw, ch);
+      const ink = "#1c1c1e", blue = "#233f94";
+      x.textAlign = "center"; x.fillStyle = ink;
+      x.font = `500 ${3.4 * u}px ${F.sans}`; spaced(x, "MAISON", cx, 38.5 * u, 1.5 * u);
+      const wh = 7.4 * u, ww = wh * IMG.wordmark.width / IMG.wordmark.height;
+      x.drawImage(IMG.wordmark, cx - ww / 2, 48.8 * u - wh, ww, wh);
+      // appellation en grandes capitales fines, cuvée en bleu
+      const app = w.appellation.replace(/\s*1er cru/i, "").toUpperCase();
+      const premier = /1er cru/i.test(w.appellation);
+      fit(x, `400 {s}px ${F.sans}`, Math.round(9.6 * u), app, W * .62);
+      spaced(x, app, cx, 62.5 * u, .35 * u);
+      const cuv = [premier ? "1ER CRU" : "", (w.cuvee || "").toUpperCase()].filter(Boolean).join(" · ");
+      if (cuv) {
+        x.fillStyle = blue;
+        const s = fit(x, `500 {s}px ${F.sans}`, Math.round(5 * u), cuv, W * .56);
+        spaced(x, cuv, cx, 70 * u, s * .12);
+      }
+      // quatre cartouches manuscrits en bas
+      const bw = W * .17, by = 80 * u, bh = 17 * u, x0 = cx - bw * 2;
+      x.strokeStyle = "rgba(40,40,44,.55)"; x.lineWidth = Math.max(1, .25 * u);
+      for (let i = 0; i < 4; i++) x.strokeRect(x0 + i * bw + .6 * u, by, bw - 1.2 * u, bh);
+      const region = /vosne|nuits/i.test(w.appellation) ? ["Côte", "de Nuits"] : ["Côte", "Chalonnaise"];
+      const notes = [
+        ["Millésime", w.vintage ? String(w.vintage) : "—"],
+        premier ? ["Premier", "Cru"] : /fortune|clos/i.test(w.cuvee || "") ? ["Clos en", "monopole"] : ["Appellation", "Village"],
+        region,
+        ["Élevé à", "Bouzeron"],
+      ];
+      x.fillStyle = "#2a2a2e";
+      notes.forEach(([a, b], i) => {
+        const bx = x0 + i * bw + bw / 2;
+        fit(x, `italic 500 {s}px ${F.serif}`, Math.round(5 * u), a, bw * .82);
+        x.fillText(a, bx, by + 7.2 * u);
+        fit(x, `italic 600 {s}px ${F.serif}`, Math.round(5.4 * u), b, bw * .82);
+        x.fillText(b, bx, by + 13.6 * u);
+      });
+    },
+  },
+
+  chanzyOld: {
+    match: () => false,
+    habit: () => ({}),
+    label: { arc: 175, h: 9.6, y: 6.9 },
     draw(x, W, H, w) {
       paper(x, W, H, "#fbfaf6", .02);
       const u = H / 100, cx = W / 2;
@@ -182,7 +265,7 @@ const STYLES = {
   beauregard: {
     match: (w) => norm(w.domaine).includes("beauregard"),
     habit: () => ({ bottle: "burgundy", glass: "antique", wine: "#e3c66c", capsule: { color: "#2b2620", metal: .55, rough: .35, top: "#b0904f" } }),
-    label: { arc: 150, h: 10.6, y: 8.6 },
+    label: { arc: 150, h: 8.4, y: 6.5 },
     draw(x, W, H, w) {
       paper(x, W, H, "#f1e8d3", .05);
       const u = H / 100, cx = W / 2, brown = "#4a3826", red = "#8c2c22";
@@ -215,7 +298,7 @@ const STYLES = {
   beauvernay: {
     match: (w) => norm(w.domaine).includes("beauvernay"),
     habit: () => ({ bottle: "burgundy", glass: "dark", capsule: { color: "#a3141e", metal: .55, rough: .35 } }),
-    label: { arc: 140, h: 10.2, y: 8.6 },
+    label: { arc: 140, h: 8.2, y: 6.5 },
     draw(x, W, H, w) {
       paper(x, W, H, "#ecdfc2", .05);
       const u = H / 100, cx = W / 2, red = "#8c2c22", brown = "#3e2f22";
@@ -260,7 +343,7 @@ const STYLES = {
   poncie: {
     match: (w) => norm(w.domaine).includes("poncie"),
     habit: () => ({ bottle: "burgundy", glass: "dark", capsule: { color: "#1f4a56", metal: .55, rough: .35 } }),
-    label: { arc: 140, h: 10.6, y: 8.6 },
+    label: { arc: 140, h: 8.4, y: 6.5 },
     draw(x, W, H, w) {
       paper(x, W, H, "#f3ecdc", .04);
       const u = H / 100, cx = W / 2, ink = "#3a2e26";
@@ -279,7 +362,7 @@ const STYLES = {
   cornin: {
     match: (w) => norm(w.domaine).includes("cornin"),
     habit: () => ({ bottle: "burgundy", glass: "flint", wine: "#ecdc93", capsule: { color: "#e4e2dc", metal: .35, rough: .4 } }),
-    label: { arc: 140, h: 10.6, y: 9 },
+    label: { arc: 140, h: 8.4, y: 6.6 },
     draw(x, W, H, w) {
       paper(x, W, H, "#fbfaf7", .02);
       const u = H / 100, cx = W / 2;
@@ -304,7 +387,7 @@ const STYLES = {
     habit: (w) => w.color === "R"
       ? { bottle: "burgundy", glass: "dark", capsule: { color: "#6e1424", metal: .5, rough: .35 } }
       : { bottle: "burgundy", glass: "antique", wine: "#e3c66c", capsule: { color: "#c2a061", metal: .6, rough: .35 } },
-    label: { arc: 145, h: 10.4, y: 8.8 },
+    label: { arc: 145, h: 8.4, y: 6.5 },
     draw(x, W, H, w) {
       paper(x, W, H, "#f3ecdd", .04);
       const u = H / 100, cx = W / 2, ink = "#2e241c", acc = w.color === "R" ? "#7d1626" : "#8a6a33";
@@ -327,7 +410,7 @@ const STYLES = {
 export function styleFor(w) {
   const key = Object.keys(STYLES).find((k) => STYLES[k].match(w));
   const s = STYLES[key];
-  return { key, ...s.habit(w), label: s.label, draw: s.draw };
+  return { key, ...s.habit(w), label: typeof s.label === "function" ? s.label(w) : s.label, draw: s.draw };
 }
 
 // Dessine l'étiquette à la bonne proportion (largeur = arc déroulé)

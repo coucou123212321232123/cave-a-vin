@@ -52,6 +52,28 @@ function status(w) {
   if (YEAR === b) return { k: "soon", t: "À boire cette année", rank: 1 };
   return { k: "late", t: "À boire sans tarder", rank: 0 };
 }
+// Garde maximale estimée (en années après le millésime), selon l'appellation et la cuvée
+const NORM = (s) => String(s ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+function gardeMax(w) {
+  const a = NORM(w.appellation), c = NORM(w.cuvee), vv = c.includes("vieilles vignes");
+  let r;
+  if (a.includes("vosne") || a.includes("nuits") || a.includes("chambertin") || a.includes("vougeot")) r = [15, 20];
+  else if (a.includes("pouilly-fuisse")) r = a.includes("1er cru") ? [10, 15] : [8, 12];
+  else if (a.includes("mercurey") || a.includes("rully") || a.includes("givry")) r = a.includes("1er cru") ? [8, 12] : [6, 9];
+  else if (a.includes("bouzeron")) r = c.includes("fortune") ? (vv ? [8, 12] : [7, 10]) : [6, 9];
+  else if (a.includes("jura") || a.includes("arbois")) r = [10, 15];
+  else if (a.includes("julienas") || a.includes("morgon") || a.includes("moulin")) r = vv ? [8, 12] : [6, 10];
+  else if (a.includes("brouilly")) r = [8, 12];
+  else if (a.includes("saint-veran") || a.includes("macon")) r = [5, 8];
+  else r = w.color === "R" ? [8, 12] : [5, 8];
+  return r;
+}
+function gardeMaxHTML(w) {
+  const [m, n] = gardeMax(w);
+  const when = w.vintage ? `jusqu'en ${w.vintage + m} – ${w.vintage + n}` : "après le millésime";
+  const late = w.vintage && YEAR > w.vintage + n;
+  return `<div class="gmax${late ? " late" : ""}"><span>Garde maximale</span><b>${m} à ${n} ans</b><em>${when}</em></div>`;
+}
 const drinkable = (w) => ["ready", "soon", "late"].includes(status(w).k);
 const priority = (w) => ["soon", "late"].includes(status(w).k);
 
@@ -198,9 +220,11 @@ function renderList() {
 
 function timelineHTML(w) {
   const [a, b] = w.garde;
-  const lo = Math.min(w.vintage || a, YEAR), hi = Math.max(b, YEAR) + 1;
+  const max = w.vintage ? w.vintage + gardeMax(w)[1] : b;
+  const lo = Math.min(w.vintage || a, YEAR), hi = Math.max(b, max, YEAR) + 1;
   const pct = (y) => ((y - lo) / (hi - lo)) * 100;
   return `<div class="timeline">
+      ${max > b ? `<div class="max" style="left:${pct(b + 1)}%;width:${pct(max + 1) - pct(b + 1)}%"></div>` : ""}
       <div class="win" style="left:${pct(a)}%;width:${pct(b + 1) - pct(a)}%"></div>
       <div class="now" style="left:calc(${pct(YEAR + 0.5)}% - 1px)"></div>
     </div>
@@ -232,7 +256,10 @@ function renderDetail(w) {
         Déboucher cette bouteille
       </button>
     </div>
-    ${w.garde && w.garde[0] ? `<div class="block rise" style="animation-delay:.25s"><div class="block-h"><span>Fenêtre de dégustation</span><span class="st-${st.k}">${esc(st.t)}</span></div>${timelineHTML(w)}</div>` : ""}
+    <div class="block rise" style="animation-delay:.25s">
+      ${w.garde && w.garde[0] ? `<div class="block-h"><span>Fenêtre de dégustation</span><span class="st-${st.k}">${esc(st.t)}</span></div>${timelineHTML(w)}` : ""}
+      ${gardeMaxHTML(w)}
+    </div>
     <div class="block rise" style="animation-delay:.3s">
       <div class="block-h"><span>Notes</span></div>
       <textarea class="notes" id="d-notes" placeholder="Accords, souvenirs, occasion…">${esc(w.notes)}</textarea>
