@@ -59,15 +59,23 @@ const BURGUNDY_SHOULDER = [
   [19.07, 1.968], [19.64, 1.823], [20.2, 1.718], [20.77, 1.613], [21.33, 1.534], [21.9, 1.481], [22.46, 1.455],
   [23.03, 1.44], [23.6, 1.43],
 ];
-// Jurassienne : corps plus étroit et plus haut, épaule haute et arrondie, long col
+// Jurassienne : profil relevé sur une vraie bouteille Rolet — corps qui s'évase légèrement vers le haut,
+// longue épaule douce (frappée « JURA » en relief), col fin
+const JURA_PROFILE = [
+  [3, 3.9], [6, 3.95], [9, 4.0], [12, 4.05], [14.5, 4.08], [15.04, 4.07], [15.54, 4.02], [16.04, 3.93], [16.54, 3.8],
+  [17.04, 3.63], [17.55, 3.43], [18.05, 3.24], [18.55, 3.05], [19.05, 2.85], [19.55, 2.64], [20.05, 2.45],
+  [20.55, 2.28], [21.05, 2.1], [21.56, 1.95], [22.06, 1.83], [22.56, 1.72], [23.06, 1.62], [23.56, 1.55],
+  [24.06, 1.51], [24.56, 1.47], [25.07, 1.45], [25.57, 1.44],
+];
 const SHAPES = {
   burgundy: { R: 4.0, body: 10.9, neck: 23.6, RN: 1.43, top: 29.6, profile: BURGUNDY_SHOULDER },
-  jura: { R: 3.78, body: 17.2, neck: 22.9, RN: 1.42, top: 30.6 },
+  jura: { R: 3.87, body: 0, neck: 24.6, RN: 1.43, top: 30.4, profile: JURA_PROFILE, emboss: [15.2, 19.4] },
 };
 
 function outline(type) {
   const s = SHAPES[type], p = [];
-  p.push(V(0, 1.7), V(1.3, 1.3), V(2.7, 0.35), V(s.R - 0.4, 0), V(s.R - 0.06, 0.14), V(s.R, 0.55), V(s.R, s.body));
+  p.push(V(0, 1.7), V(1.3, 1.3), V(2.7, 0.35), V(s.R - 0.4, 0), V(s.R - 0.06, 0.14), V(s.R, 0.55));
+  if (s.body) p.push(V(s.R, s.body));
   if (s.profile) {
     for (const [h, r] of s.profile) p.push(V(r, h));
   } else {
@@ -104,13 +112,23 @@ const capGeo = (t) => geoFor("cap-" + t, () => {
     V(RN + 0.25, s.top + 0.06), V(RN + 0.1, s.top + 0.16), V(0, s.top + 0.16),
   ], 48);
 });
-const labelGeo = (t, arcDeg, h) => geoFor(`lbl-${t}-${arcDeg}-${h}`, () => {
-  const r = SHAPES[t].R + 0.035, arc = THREE.MathUtils.degToRad(arcDeg);
-  return new THREE.CylinderGeometry(r, r, h, 64, 1, true, -arc / 2, arc);
+// rayon extérieur de la bouteille à une hauteur donnée (le corps jurassien n'est pas parfaitement droit)
+function radiusAt(t, y) {
+  const p = outline(t).filter((q) => q.y >= 0.5);
+  for (let i = 1; i < p.length; i++) {
+    if (p[i].y >= y) { const a = p[i - 1], b = p[i], k = (y - a.y) / Math.max(1e-6, b.y - a.y); return a.x + (b.x - a.x) * k; }
+  }
+  return SHAPES[t].R;
+}
+const labelGeo = (t, arcDeg, h, y) => geoFor(`lbl-${t}-${arcDeg}-${h}-${y}`, () => {
+  const arc = THREE.MathUtils.degToRad(arcDeg);
+  const rT = radiusAt(t, y + h / 2) + 0.035, rB = radiusAt(t, y - h / 2) + 0.035;
+  return new THREE.CylinderGeometry(rT, rB, h, 64, 1, true, -arc / 2, arc);
 });
-const backGeo = (t) => geoFor("back-" + t, () => {
-  const r = SHAPES[t].R + 0.035, arc = THREE.MathUtils.degToRad(64);
-  return new THREE.CylinderGeometry(r, r, 7, 24, 1, true, Math.PI - arc / 2, arc);
+const backGeo = (t, y) => geoFor(`back-${t}-${y}`, () => {
+  const arc = THREE.MathUtils.degToRad(64);
+  const rT = radiusAt(t, y + 3.5) + 0.035, rB = radiusAt(t, y - 3.5) + 0.035;
+  return new THREE.CylinderGeometry(rT, rB, 7, 24, 1, true, Math.PI - arc / 2, arc);
 });
 
 /* ——————————————— Matériaux ——————————————— */
@@ -197,6 +215,31 @@ function labelTexture(w, res) {
   return tex;
 }
 
+// « JURA » frappé en relief dans le verre de l'épaule
+let embossMat;
+function embossGeo(t) {
+  return geoFor("emboss-" + t, () => {
+    const [a, b] = SHAPES[t].emboss, arc = THREE.MathUtils.degToRad(100);
+    const pts = outline(t).filter((q) => q.y >= a && q.y <= b).map((q) => V(q.x + 0.045, q.y));
+    return new THREE.LatheGeometry(pts, 40, -arc / 2, arc);
+  });
+}
+function getEmbossMat() {
+  if (embossMat) return embossMat;
+  const c = document.createElement("canvas"); c.width = 512; c.height = 512;
+  const x = c.getContext("2d");
+  x.fillStyle = "#000"; x.fillRect(0, 0, 512, 512);
+  x.fillStyle = "#fff"; x.textAlign = "center"; x.textBaseline = "middle";
+  x.font = `700 250px "Cinzel", Georgia, serif`;
+  x.save(); x.translate(256, 250); x.scale(0.66, 1.2); x.fillText("JURA", 0, 0); x.restore();
+  const t = new THREE.CanvasTexture(c);
+  embossMat = new THREE.MeshPhysicalMaterial({
+    color: 0xfff0c4, alphaMap: t, bumpMap: t, bumpScale: 2, transparent: true, opacity: 0.42, depthWrite: false,
+    roughness: 0.12, metalness: 0, clearcoat: 1, envMap: glassEnv, envMapIntensity: 1.4,
+  });
+  return embossMat;
+}
+
 /* ——————————————— Bouteille ——————————————— */
 function makeBottle(w) {
   const st = styleFor(w);
@@ -216,16 +259,21 @@ function makeBottle(w) {
     shine.renderOrder = 5;
     g.add(tint, shine);
   }
+  if (SHAPES[t].emboss) {
+    const em = new THREE.Mesh(embossGeo(t), getEmbossMat());
+    em.renderOrder = 6;
+    g.add(em);
+  }
   const cap = new THREE.Mesh(capGeo(t), capMat(st.capsule));
   cap.castShadow = true;
   g.add(cap);
   const tex = labelTexture(w, LOW_RES);
   const labelMat = new THREE.MeshStandardMaterial({ map: tex, bumpMap: tex, bumpScale: 0.6, roughness: 0.78, metalness: 0, envMapIntensity: 0.5, alphaTest: st.label.cutout ? 0.5 : 0 });
-  const label = new THREE.Mesh(labelGeo(t, st.label.arc, st.label.h), labelMat);
+  const label = new THREE.Mesh(labelGeo(t, st.label.arc, st.label.h, st.label.y), labelMat);
   label.position.y = st.label.y;
   label.renderOrder = 3;
   g.add(label);
-  const back = new THREE.Mesh(backGeo(t), mats.back);
+  const back = new THREE.Mesh(backGeo(t, st.label.y - 0.5), mats.back);
   back.position.y = st.label.y - 0.5;
   g.add(back);
   g.userData = { wineId: w.id, w, labelMat };

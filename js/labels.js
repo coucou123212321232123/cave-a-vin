@@ -319,24 +319,25 @@ const STYLES = {
 
   rolet: {
     match: (w) => norm(w.domaine).includes("rolet"),
-    habit: () => ({ bottle: "jura", glass: "amber", wine: "#ddb466", capsule: { color: "#8a5a3a", metal: .6, rough: .35 } }),
-    label: { arc: 140, h: 10.4, y: 8.8 },
+    // vraie bouteille : jurassienne en verre clair, capsule jaune d'or
+    habit: () => ({ bottle: "jura", glass: "flint", wine: "#e4c56a", capsule: { color: "#dca22c", metal: .3, rough: .38 } }),
+    label: { arc: 150, h: 11, y: 7.5 },
     draw(x, W, H, w) {
-      paper(x, W, H, "#f4f0e6", .03);
-      const u = H / 100, cx = W / 2, ink = "#2a2622";
+      paper(x, W, H, "#f6f2e9", .03);
+      const u = H / 100, cx = W / 2, ink = "#26221f", green = "#7d9a3c";
       x.textAlign = "center"; x.fillStyle = ink;
-      x.font = `600 ${3.2 * u}px ${F.sans}`; spaced(x, "DOMAINE", cx, 15 * u, 1.3 * u);
-      x.font = `600 ${13 * u}px ${F.caps}`; spaced(x, "ROLET", cx, 30 * u, 1 * u);
-      x.strokeStyle = "#9c8a6e"; x.lineWidth = 1.4;
-      x.beginPath(); x.moveTo(cx - W * .14, 36 * u); x.lineTo(cx + W * .14, 36 * u); x.stroke();
-      x.lineWidth = 1.6; x.strokeStyle = "#8c7a5c";
-      x.font = `italic 500 ${15 * u}px ${F.serif}`;
-      x.strokeText("Côtes", cx, 54 * u); x.strokeText("du Jura", cx, 68 * u);
-      x.fillStyle = ink; x.font = `600 ${5.4 * u}px ${F.serif}`;
-      x.fillText(w.vintage ? String(w.vintage) : "", cx, 80 * u);
-      x.font = `500 ${2.2 * u}px ${F.sans}`; x.fillStyle = "#857a6a";
-      spaced(x, "APPELLATION CÔTES DU JURA PROTÉGÉE", cx, 89 * u, .45 * u);
-      spaced(x, "ROLET PÈRE & FILS · ARBOIS · JURA", cx, 94 * u, .45 * u);
+      x.font = `600 ${3.6 * u}px ${F.sans}`; spaced(x, "DOMAINE", cx, 10.5 * u, 1.1 * u);
+      x.font = `600 ${12 * u}px ${F.caps}`; spaced(x, "ROLET", cx, 23.5 * u, .9 * u);
+      // « côtes du jura » en lettres creuses fines, comme sur l'étiquette
+      x.strokeStyle = "#9a958c"; x.lineWidth = Math.max(1, .32 * u); x.lineJoin = "round";
+      x.font = `300 ${13 * u}px ${F.sans}`;
+      x.strokeText("côtes", cx, 43 * u); x.strokeText("du jura", cx, 54 * u);
+      x.fillStyle = green; x.font = `600 ${3.8 * u}px ${F.sans}`;
+      spaced(x, (w.cuvee || (w.vintage ? String(w.vintage) : "")).toUpperCase(), cx, 61.5 * u, .9 * u);
+      x.strokeStyle = "#cfc8b9"; x.lineWidth = Math.max(1, .2 * u);
+      x.beginPath(); x.moveTo(W * .22, 89 * u); x.lineTo(W * .78, 89 * u); x.stroke();
+      x.fillStyle = "#57514a"; x.font = `500 ${2.6 * u}px ${F.sans}`;
+      spaced(x, "VIGNERON · ARBOIS · JURA", cx, 94 * u, .6 * u);
     },
   },
 
