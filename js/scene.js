@@ -810,7 +810,7 @@ function bindPointer() {
   let p = null;
   const ray = new THREE.Raycaster();
   canvasEl.addEventListener("pointerdown", (e) => {
-    p = { x: e.clientX, y: e.clientY, lx: e.clientX, ly: e.clientY, moved: false };
+    p = { x: e.clientX, y: e.clientY, lx: e.clientX, ly: e.clientY, moved: false, axis: null };
     canvasEl.setPointerCapture(e.pointerId);
     panVel = 0; panVelX = 0; spinVel = 0;
   });
@@ -821,9 +821,12 @@ function bindPointer() {
     if (Math.hypot(e.clientX - p.x, e.clientY - p.y) > 7) p.moved = true;
     if (!p.moved) return;
     if (mode === "cabinet") {
+      // un seul axe par geste : le sens dominant au départ du glisser (jamais de diagonale)
+      if (!p.axis) p.axis = Math.abs(e.clientX - p.x) > Math.abs(e.clientY - p.y) ? "x" : "y";
       const k = viewH() / canvasEl.clientHeight;
-      panY = clampPan(panY + dy * k); panVel = dy * k;
-      panX = clampPanX(panX - dx * k); panVelX = -dx * k; dirty = true;
+      if (p.axis === "y") { panY = clampPan(panY + dy * k); panVel = dy * k; panVelX = 0; }
+      else { panX = clampPanX(panX - dx * k); panVelX = -dx * k; panVel = 0; }
+      dirty = true;
     } else if (mode === "focus") {
       spin += dx * 0.012; spinVel = dx * 0.012; lastInteract = performance.now();
     }
@@ -840,7 +843,8 @@ function bindPointer() {
     e.preventDefault();
     const k = viewH() / canvasEl.clientHeight * 0.6;
     if (e.shiftKey && !e.deltaX) panX = clampPanX(panX + e.deltaY * k);
-    else { panY = clampPan(panY - e.deltaY * k); panX = clampPanX(panX + e.deltaX * k); }
+    else if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) panX = clampPanX(panX + e.deltaX * k);
+    else panY = clampPan(panY - e.deltaY * k);
     dirty = true;
   }, { passive: false });
 }
