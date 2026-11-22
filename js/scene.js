@@ -1,5 +1,6 @@
 // Scène 3D : la cave, les bouteilles, la caméra et les interactions.
 import * as THREE from "three";
+import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { styleFor, drawLabel, loadFonts } from "./labels.js";
 
 // Studio photo virtuel : longues boîtes à lumière verticales (les reflets typiques des bouteilles)
@@ -34,7 +35,7 @@ const TILT = -0.3;           // bouteilles penchées vers l'arrière
 const BOTTLE_Z = 7.5;        // pied des bouteilles, derrière la barre de façade
 const doorX = (d) => (d - (DOORS - 1) / 2) * (INNER_W + MID);
 const FOV = 32, TAN = Math.tan(THREE.MathUtils.degToRad(FOV / 2));
-const LOW_RES = 46, HI_RES = 150;
+const LOW_RES = 46, HI_RES = 110;
 
 let renderer, scene, camera, root, frame, bottleRoot, dimPlane, canvasEl;
 let shelfCount = 5, cabH = 0;
@@ -50,6 +51,10 @@ const labelCache = new Map();
 const geoCache = new Map();
 const mats = {};
 let envTex, glassEnv;
+// Résolution adaptative : si l'appareil peine (images > 24 ms), on baisse un peu la définition
+const DPR_MAX = Math.min(window.devicePixelRatio || 1, 2);
+const DPR_MIN = Math.min(DPR_MAX, 1.5);   // plancher : l'image reste nette
+let dpr = DPR_MAX, slow = 0, lastFrame = 0, lastRot = null, startT = 0;
 
 /* ——————————————— Géométries ——————————————— */
 // Bourguignonne : profil relevé sur une vraie bouteille Chanzy (hauteur cm, rayon cm) — longues épaules en pente douce
@@ -120,11 +125,6 @@ function radiusAt(t, y) {
   }
   return SHAPES[t].R;
 }
-const labelGeo = (t, arcDeg, h, y) => geoFor(`lbl-${t}-${arcDeg}-${h}-${y}`, () => {
-  const arc = THREE.MathUtils.degToRad(arcDeg);
-  const rT = radiusAt(t, y + h / 2) + 0.035, rB = radiusAt(t, y - h / 2) + 0.035;
-  return new THREE.CylinderGeometry(rT, rB, h, 64, 1, true, -arc / 2, arc);
-});
 const backGeo = (t, y) => geoFor(`back-${t}-${y}`, () => {
   const arc = THREE.MathUtils.degToRad(64);
   const rT = radiusAt(t, y + 3.5) + 0.035, rB = radiusAt(t, y - 3.5) + 0.035;
@@ -205,14 +205,46 @@ function capMat(c) {
 function labelKey(w, res) {
   return [res, w.domaine, w.appellation, w.cuvee, w.vintage, w.color].join("|");
 }
+// Étiquette → textures. Une étiquette « découpée » (blason qui dépasse) est séparée en deux textures :
+// le rectangle, sans aucune transparence (bord parfaitement net), et la bande du haut avec le blason.
+function makeTex(canvas) {
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+  tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+  return tex;
+}
+function sliceCanvas(src, y0, y1) {
+  const c = document.createElement("canvas"); c.width = src.width; c.height = Math.max(1, y1 - y0);
+  c.getContext("2d").drawImage(src, 0, y0, src.width, y1 - y0, 0, 0, src.width, y1 - y0);
+  return c;
+}
 function labelTexture(w, res) {
   const k = labelKey(w, res);
   if (labelCache.has(k)) return labelCache.get(k);
-  const tex = new THREE.CanvasTexture(drawLabel(w, res));
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
-  labelCache.set(k, tex);
-  return tex;
+  const full = drawLabel(w, res);
+  const band = styleFor(w).label.cutout || 0;
+  let out;
+  if (!band) out = { rect: makeTex(full) };
+  else {
+    const by = Math.round(full.height * band);
+    const bandC = sliceCanvas(full, 0, by);
+    // largeur utile de la bande (le blason) pour ne pas dessiner de grande zone vide découpée
+    const d = bandC.getContext("2d").getImageData(0, 0, bandC.width, bandC.height).data;
+    let lo = bandC.width, hi = 0;
+    for (let y = 0; y < bandC.height; y += 2) for (let x = 0; x < bandC.width; x++) if (d[(y * bandC.width + x) * 4 + 3] > 8) { if (x < lo) lo = x; if (x > hi) hi = x; }
+    out = { rect: makeTex(sliceCanvas(full, by, full.height)), band: makeTex(bandC), span: hi > lo ? [Math.max(0, lo - 3) / bandC.width, Math.min(bandC.width, hi + 4) / bandC.width] : null };
+  }
+  labelCache.set(k, out);
+  return out;
+}
+// morceau d'étiquette posé sur la bouteille : arc [u0,u1] de l'étiquette, hauteur h centrée en y
+function labelPartGeo(t, arcDeg, h, y, u0 = 0, u1 = 1) {
+  return geoFor(`lp-${t}-${arcDeg}-${h.toFixed(3)}-${y.toFixed(3)}-${u0.toFixed(3)}-${u1.toFixed(3)}`, () => {
+    const arc = THREE.MathUtils.degToRad(arcDeg);
+    const rT = radiusAt(t, y + h / 2) + 0.035, rB = radiusAt(t, y - h / 2) + 0.035;
+    return new THREE.CylinderGeometry(rT, rB, h, Math.max(8, Math.round(64 * (u1 - u0))), 1, true, -arc / 2 + u0 * arc, (u1 - u0) * arc);
+  });
 }
 
 // « JURA » frappé en relief dans le verre de l'épaule
@@ -267,16 +299,30 @@ function makeBottle(w) {
   const cap = new THREE.Mesh(capGeo(t), capMat(st.capsule));
   cap.castShadow = true;
   g.add(cap);
-  const tex = labelTexture(w, LOW_RES);
-  const labelMat = new THREE.MeshStandardMaterial({ map: tex, bumpMap: tex, bumpScale: 0.6, roughness: 0.78, metalness: 0, envMapIntensity: 0.5, alphaTest: st.label.cutout ? 0.5 : 0 });
-  const label = new THREE.Mesh(labelGeo(t, st.label.arc, st.label.h, st.label.y), labelMat);
-  label.position.y = st.label.y;
+  const tx = labelTexture(w, LOW_RES), lab = st.label, band = lab.cutout || 0;
+  const labelMat = new THREE.MeshStandardMaterial({ map: tx.rect, bumpMap: tx.rect, bumpScale: 0.6, roughness: 0.78, metalness: 0, envMapIntensity: 0.5 });
+  const rectH = lab.h * (1 - band), rectY = lab.y - lab.h / 2 + rectH / 2;
+  const label = new THREE.Mesh(labelPartGeo(t, lab.arc, rectH, rectY), labelMat);
+  label.position.y = rectY;
   label.renderOrder = 3;
   g.add(label);
+  let crestMat = null;
+  if (band && tx.span) {
+    crestMat = new THREE.MeshStandardMaterial({ map: tx.band, bumpMap: tx.band, bumpScale: 0.6, roughness: 0.78, metalness: 0, envMapIntensity: 0.5, alphaTest: 0.5, alphaToCoverage: true });
+    const bh = lab.h * band, by = lab.y + lab.h / 2 - bh / 2, [u0, u1] = tx.span;
+    const geo = labelPartGeo(t, lab.arc, bh, by, u0, u1).clone();
+    // l'UV horizontal de ce morceau correspond à [u0,u1] de la texture de bande
+    const uv = geo.attributes.uv;
+    for (let i = 0; i < uv.count; i++) uv.setX(i, u0 + uv.getX(i) * (u1 - u0));
+    const crest = new THREE.Mesh(geo, crestMat);
+    crest.position.y = by;
+    crest.renderOrder = 3;
+    g.add(crest);
+  }
   const back = new THREE.Mesh(backGeo(t, st.label.y - 0.5), mats.back);
   back.position.y = st.label.y - 0.5;
   g.add(back);
-  g.userData = { wineId: w.id, w, labelMat };
+  g.userData = { wineId: w.id, w, labelMat, crestMat };
   return g;
 }
 
@@ -403,19 +449,48 @@ function buildFrame() {
   const blob = new THREE.Mesh(new THREE.PlaneGeometry(OUT_W * 1.6, DEPTH * 2.4), shadowBlobMat);
   blob.rotation.x = -Math.PI / 2; blob.position.y = 0.05;
   frame.add(blob);
+  mergeStatic(frame);
   root.add(frame);
+  refreshShadows();
 }
+
+// La cave ne bouge pas : ses ~150 pièces sont fusionnées par matériau (une dizaine d'appels de dessin au lieu de 150)
+function mergeStatic(group) {
+  group.updateMatrixWorld(true);
+  const buckets = new Map();
+  for (const m of [...group.children]) {
+    if (!m.isMesh) continue;
+    const key = [m.material.uuid, m.castShadow, m.receiveShadow, m.renderOrder].join("|");
+    if (!buckets.has(key)) buckets.set(key, []);
+    buckets.get(key).push(m);
+  }
+  for (const list of buckets.values()) {
+    if (list.length < 2) continue;
+    const geos = list.map((m) => { const g = m.geometry.clone(); g.clearGroups(); g.applyMatrix4(m.matrix); return g; });
+    const merged = mergeGeometries(geos, false);
+    geos.forEach((g) => g.dispose());
+    if (!merged) continue;
+    const mm = new THREE.Mesh(merged, list[0].material);
+    mm.castShadow = list[0].castShadow; mm.receiveShadow = list[0].receiveShadow; mm.renderOrder = list[0].renderOrder;
+    for (const m of list) { group.remove(m); m.geometry.dispose(); }
+    group.add(mm);
+  }
+}
+
+// Ombres : calculées seulement quand quelque chose change (et non à chaque image)
+function refreshShadows() { if (renderer) renderer.shadowMap.needsUpdate = true; dirty = true; }
 
 /* ——————————————— Init ——————————————— */
 export async function init(canvas, callbacks) {
   canvasEl = canvas; cb = callbacks;
   renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance" });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.setPixelRatio(dpr);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.0;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.shadowMap.autoUpdate = false;
 
   scene = new THREE.Scene();
   scene.background = new THREE.Color(BG);
@@ -495,7 +570,7 @@ export function setWines(list) {
   });
   if (mode === "focus") { mode = "cabinet"; hideDim(true); }
   panY = clampPan(panY);
-  dirty = true;
+  refreshShadows();
 }
 
 export function setFilter(fn) {
@@ -510,9 +585,9 @@ export function setFilter(fn) {
       m.castShadow = on;
     });
     const from = b.userData.push, to = on ? 0 : -7;
-    if (from !== to) tween(0.45, (e) => { b.userData.push = from + (to - from) * e; b.position.z = b.userData.home.pos.z + b.userData.push; });
+    if (from !== to) tween(0.45, (e) => { b.userData.push = from + (to - from) * e; b.position.z = b.userData.home.pos.z + b.userData.push; }).then(refreshShadows);
   }
-  dirty = true;
+  refreshShadows();
 }
 
 /* ——————————————— Caméra ——————————————— */
@@ -631,8 +706,11 @@ function attachShadow(b) {
 }
 function setLabelRes(b, res) {
   const t = labelTexture(b.userData.w, res);
-  b.userData.labelMat.map = t; b.userData.labelMat.bumpMap = t;
-  b.userData.labelMat.needsUpdate = true;
+  // envoi au GPU tout de suite : pas de saccade sur la première image de l'animation
+  renderer.initTexture(t.rect); if (t.band) renderer.initTexture(t.band);
+  const { labelMat, crestMat } = b.userData;
+  labelMat.map = labelMat.bumpMap = t.rect; labelMat.needsUpdate = true;
+  if (crestMat && t.band) { crestMat.map = crestMat.bumpMap = t.band; crestMat.needsUpdate = true; }
 }
 
 export async function focus(wineId, idx) {
@@ -702,6 +780,7 @@ export async function unfocus() {
   hideDim(true);
   focused = null;
   mode = "cabinet";
+  refreshShadows();
 }
 
 // Bouteille débouchée : elle s'élève et disparaît
@@ -723,6 +802,7 @@ export async function dropFocused() {
   focused = null;
   hideDim(true);
   mode = "cabinet";
+  refreshShadows();
 }
 
 /* ——————————————— Entrées ——————————————— */
@@ -822,6 +902,18 @@ function loop(now) {
   const moving = mode !== "cabinet" || active || dirty;
   if (!moving) return;
   applyPose(currentPose);
+  // la cave pivote (entrée / sortie) : ses ombres changent
+  if (root.rotation.y !== lastRot) { lastRot = root.rotation.y; renderer.shadowMap.needsUpdate = true; }
   renderer.render(scene, camera);
   dirty = false;
+  // fluidité : si les images prennent trop de temps pendant une animation, on baisse un peu la définition
+  const dt = now - lastFrame; lastFrame = now;
+  if (!startT) startT = now;
+  if (now - startT > 4000 && dt > 0 && dt < 120 && document.visibilityState === "visible") {
+    if (dt > 24) slow++; else if (slow > 0) slow -= 0.5;
+    if (slow > 60 && dpr > DPR_MIN) {
+      dpr = Math.max(DPR_MIN, +(dpr - 0.25).toFixed(2)); slow = 0;
+      renderer.setPixelRatio(dpr); resize();
+    }
+  }
 }

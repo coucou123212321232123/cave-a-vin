@@ -13,11 +13,11 @@ const IMG = {};
 // Vraies étiquettes Chanzy, photographiées sur chanzy.com puis « déroulées » à plat.
 // h / y en cm (hauteur totale blason compris, centre au-dessus du fond de la bouteille)
 const CHANZY_PHOTOS = {
-  "clous": { h: 8.37, y: 6.2 },
-  "corderes": { h: 8.29, y: 6.21 },
-  "fortune": { h: 8.76, y: 6.52 },
-  "fortune-vv": { h: 8.37, y: 6.15 },
-  "clos-du-roy": { h: 8.77, y: 6.43 },
+  "clous": { h: 8.37, y: 6.2, band: 0.148 },
+  "corderes": { h: 8.29, y: 6.21, band: 0.149 },
+  "fortune": { h: 8.76, y: 6.52, band: 0.148 },
+  "fortune-vv": { h: 8.37, y: 6.15, band: 0.148 },
+  "clos-du-roy": { h: 8.77, y: 6.43, band: 0.15 },
 };
 function chanzyPhoto(w) {
   const c = norm(w.cuvee);
@@ -177,7 +177,8 @@ const STYLES = {
     // étiquette blanche texturée, blason découpé qui dépasse au-dessus (comme les vraies bouteilles)
     label: (w) => {
       const k = chanzyPhoto(w);
-      return k ? { arc: 148, h: CHANZY_PHOTOS[k].h, y: CHANZY_PHOTOS[k].y, cutout: true } : { arc: 175, h: 9.6, y: 6.9, cutout: true };
+      // cutout = hauteur (fraction) de la bande du haut où seul le blason découpé dépasse
+      return k ? { arc: 148, ...CHANZY_PHOTOS[k], cutout: CHANZY_PHOTOS[k].band } : { arc: 175, h: 9.6, y: 6.9, cutout: 0.15 };
     },
     draw(x, W, H, w) {
       const photo = IMG["chanzy-" + chanzyPhoto(w)];
@@ -420,7 +421,9 @@ export function drawLabel(w, pxPerCm) {
   const r = 4.05;
   const Wcm = (st.label.arc * Math.PI / 180) * r, Hcm = st.label.h;
   const c = document.createElement("canvas");
-  c.width = Math.round(Wcm * pxPerCm); c.height = Math.round(Hcm * pxPerCm);
+  // plafonné : au-delà, aucun gain visible et l'envoi au GPU ferait saccader l'animation
+  const ppc = Math.min(pxPerCm, 1800 / Wcm);
+  c.width = Math.round(Wcm * ppc); c.height = Math.round(Hcm * ppc);
   const x = c.getContext("2d");
   x.textBaseline = "alphabetic";
   st.draw(x, c.width, c.height, w);
