@@ -1,7 +1,29 @@
 // Scène 3D : la cave, les bouteilles, la caméra et les interactions.
 import * as THREE from "three";
-import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import { styleFor, drawLabel, loadFonts } from "./labels.js";
+
+// Studio photo virtuel : longues boîtes à lumière verticales (les reflets typiques des bouteilles)
+function studioEnvironment(renderer, boost = 1) {
+  const s = new THREE.Scene();
+  const room = new THREE.Mesh(new THREE.BoxGeometry(120, 120, 120), new THREE.MeshBasicMaterial({ color: 0x6f675d, side: THREE.BackSide }));
+  s.add(room);
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(120, 120), new THREE.MeshBasicMaterial({ color: 0xb9ab95 }));
+  floor.rotation.x = -Math.PI / 2; floor.position.y = -40; s.add(floor);
+  const panel = (w, h, pos, intensity, tint = 0xffffff) => {
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ color: new THREE.Color(tint).multiplyScalar(intensity * boost), side: THREE.DoubleSide }));
+    m.position.copy(pos); m.lookAt(0, pos.y, 0); s.add(m);
+    return m;
+  };
+  panel(9, 80, new THREE.Vector3(-34, 4, 30), 9);          // grande boîte à gauche
+  panel(4, 80, new THREE.Vector3(38, 4, 18), 6);           // fine bande à droite
+  panel(3, 80, new THREE.Vector3(-14, 4, -46), 2.5, 0xfff1dc); // contre-jour
+  const top = panel(50, 26, new THREE.Vector3(0, 50, 6), 2.2, 0xfff6ea);
+  top.lookAt(0, 0, 6);
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  const tex = pmrem.fromScene(s, 0.015).texture;
+  pmrem.dispose();
+  return tex;
+}
 
 const BG = 0xf3ede3;
 const SLOT = 10.8, PER = 6, SIDE = 2.6, DEPTH = 34, SHELF_T = 2.4, GAP = 36, PLINTH = 8, TOP = 3.4;
@@ -22,7 +44,7 @@ const V = (x, y) => new THREE.Vector2(x, y);
 const labelCache = new Map();
 const geoCache = new Map();
 const mats = {};
-let envTex;
+let envTex, glassEnv;
 
 /* ——————————————— Géométries ——————————————— */
 const SHAPES = {
@@ -48,14 +70,14 @@ function geoFor(key, make) {
   if (!geoCache.has(key)) geoCache.set(key, make());
   return geoCache.get(key);
 }
-const bodyGeo = (t) => geoFor("body-" + t, () => new THREE.LatheGeometry(outline(t), 72));
+const bodyGeo = (t) => geoFor("body-" + t, () => new THREE.LatheGeometry(outline(t), 96));
+// Le vin : suit la paroi intérieure (verre ≈ 3 mm), remplit jusqu'au bas du goulot
 const wineGeo = (t) => geoFor("wine-" + t, () => {
-  const s = SHAPES[t], fill = s.neck + 1.2;
-  const pts = outline(t).filter((p) => p.y > 0.4 && p.y <= fill).map((p) => V(p.x * 0.93, Math.max(p.y, 0.9)));
-  const last = pts[pts.length - 1];
-  pts.unshift(V(0, 2.0));
-  pts.push(V(last.x, fill), V(0, fill));
-  return new THREE.LatheGeometry(pts, 48);
+  const s = SHAPES[t], fill = s.neck + 1.6;
+  const inner = outline(t).filter((p) => p.y > 0.5 && p.y <= fill).map((p) => V(Math.max(0.2, p.x - 0.3), Math.max(p.y, 0.75)));
+  const last = inner[inner.length - 1];
+  const rFill = Math.max(0.2, (SHAPES[t].RN) - 0.25);
+  return new THREE.LatheGeometry([V(0, 2.0), V(1.1, 1.6), V(2.3, 0.8), ...inner, V(Math.min(last.x, rFill + 0.4), fill), V(0, fill)], 72);
 });
 const capGeo = (t) => geoFor("cap-" + t, () => {
   const s = SHAPES[t], RN = s.RN;
@@ -74,29 +96,73 @@ const backGeo = (t) => geoFor("back-" + t, () => {
 });
 
 /* ——————————————— Matériaux ——————————————— */
-function initMaterials() {
-  const glass = (color, opts = {}) => new THREE.MeshPhysicalMaterial({
-    color, roughness: 0.09, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.05, envMapIntensity: 1.25, ...opts,
+// Verre : trois recettes
+//  - "dark"  (rouges) : verre vert-noir opaque, très brillant, liseré vert sur les bords
+//  - verre clair / teinté (blancs) : vin translucide qui réfracte la lumière
+//    + une coque teintée + une coque de reflets (mélange additif, donc aucun voile laiteux)
+const GLASS_TINT = {
+  flint: { color: 0x4a4a2c, base: 0.05, edge: 0.92, pow: 1.7 },
+  antique: { color: 0x37350e, base: 0.42, edge: 0.55, pow: 2.0 },
+  amber: { color: 0x3f2309, base: 0.48, edge: 0.5, pow: 2.0 },
+};
+// Teinte du verre plus dense sur les bords (là où la lumière traverse plus d'épaisseur)
+function fresnelTint({ color, base, edge, pow }) {
+  return new THREE.ShaderMaterial({
+    uniforms: { uColor: { value: new THREE.Color(color) }, uBase: { value: base }, uEdge: { value: edge }, uPow: { value: pow } },
+    vertexShader: `
+      varying vec3 vN; varying vec3 vV;
+      void main() {
+        vec4 mv = modelViewMatrix * vec4(position, 1.0);
+        vN = normalize(normalMatrix * normal); vV = normalize(-mv.xyz);
+        gl_Position = projectionMatrix * mv;
+      }`,
+    fragmentShader: `
+      uniform vec3 uColor; uniform float uBase; uniform float uEdge; uniform float uPow;
+      varying vec3 vN; varying vec3 vV;
+      void main() {
+        float f = pow(1.0 - abs(dot(normalize(vN), normalize(vV))), uPow);
+        gl_FragColor = vec4(uColor, clamp(uBase + uEdge * f, 0.0, 1.0));
+        #include <colorspace_fragment>
+      }`,
+    transparent: true, depthWrite: false,
   });
-  mats.dark = glass(0x0a120a);
-  mats.antique = glass(0x34361a, { envMapIntensity: 1.35 });
-  mats.amber = glass(0x3e2610, { envMapIntensity: 1.35 });
-  mats.flint = glass(0xe9f2ea, { transparent: true, opacity: 0.13, roughness: 0.02, envMapIntensity: 2.6, depthWrite: false });
+}
+function initMaterials() {
+  mats.dark = new THREE.MeshPhysicalMaterial({
+    color: 0x07100a, roughness: 0.045, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.03, envMap: glassEnv,
+    specularIntensity: 1, envMapIntensity: 0.55, sheen: 1, sheenColor: new THREE.Color(0x24462a), sheenRoughness: 0.35,
+  });
+  mats.shine = new THREE.MeshPhysicalMaterial({
+    color: 0x000000, roughness: 0.03, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.02, envMap: glassEnv,
+    specularIntensity: 1, envMapIntensity: 1.1,
+    transparent: true, blending: THREE.AdditiveBlending, depthWrite: false,
+  });
+  for (const [k, v] of Object.entries(GLASS_TINT)) mats["tint-" + k] = fresnelTint(v);
   mats.back = new THREE.MeshStandardMaterial({ color: 0xefe7d6, roughness: 0.85 });
   mats.ghost = new THREE.MeshStandardMaterial({ color: 0xe9dfcf, roughness: 0.6, transparent: true, opacity: 0.22, depthWrite: false });
 }
 const wineMats = new Map();
-function wineMat(hex) {
-  if (!wineMats.has(hex)) {
-    const c = new THREE.Color(hex);
-    wineMats.set(hex, new THREE.MeshPhysicalMaterial({ color: c, roughness: 0.08, metalness: 0, clearcoat: 0.6, emissive: c.clone().multiplyScalar(0.07), envMapIntensity: 1.1 }));
+function wineMat(hex, glass) {
+  const k = hex + glass;
+  if (!wineMats.has(k)) {
+    wineMats.set(k, new THREE.MeshPhysicalMaterial({
+      color: 0xffffff, metalness: 0, roughness: 0, ior: 1.34,
+      transmission: 1, thickness: 7.2,
+      attenuationColor: new THREE.Color(hex), attenuationDistance: glass === "flint" ? 5 : 6,
+      specularIntensity: 0.4, envMap: glassEnv, envMapIntensity: 0.25,
+    }));
   }
-  return wineMats.get(hex);
+  return wineMats.get(k);
 }
 const capMats = new Map();
 function capMat(c) {
   const k = JSON.stringify(c);
-  if (!capMats.has(k)) capMats.set(k, new THREE.MeshStandardMaterial({ color: c.color, metalness: c.metal, roughness: c.rough, envMapIntensity: 1.1 }));
+  if (!capMats.has(k)) {
+    capMats.set(k, new THREE.MeshPhysicalMaterial({
+      color: c.color, metalness: c.metal, roughness: c.rough, envMap: glassEnv, envMapIntensity: 0.45,
+      clearcoat: c.metal < 0.3 ? 0.25 : 0.6, clearcoatRoughness: 0.25,
+    }));
+  }
   return capMats.get(k);
 }
 
@@ -118,19 +184,25 @@ function makeBottle(w) {
   const st = styleFor(w);
   const g = new THREE.Group();
   const t = st.bottle;
-  const body = new THREE.Mesh(bodyGeo(t), mats[st.glass]);
-  body.castShadow = true; body.receiveShadow = st.glass !== "flint";
-  if (st.glass === "flint") {
-    const wine = new THREE.Mesh(wineGeo(t), wineMat(st.wine || "#d8b04e"));
+  if (st.glass === "dark") {
+    const body = new THREE.Mesh(bodyGeo(t), mats.dark);
+    body.castShadow = true; body.receiveShadow = true;
+    g.add(body);
+  } else {
+    const wine = new THREE.Mesh(wineGeo(t), wineMat(st.wine || "#e6d38c", st.glass));
     wine.castShadow = true;
     g.add(wine);
-    body.renderOrder = 2;
+    const tint = new THREE.Mesh(bodyGeo(t), mats["tint-" + st.glass]);
+    tint.renderOrder = 4;
+    const shine = new THREE.Mesh(bodyGeo(t), mats.shine);
+    shine.renderOrder = 5;
+    g.add(tint, shine);
   }
-  g.add(body);
   const cap = new THREE.Mesh(capGeo(t), capMat(st.capsule));
   cap.castShadow = true;
   g.add(cap);
-  const labelMat = new THREE.MeshStandardMaterial({ map: labelTexture(w, LOW_RES), roughness: 0.82, metalness: 0, envMapIntensity: 0.55 });
+  const tex = labelTexture(w, LOW_RES);
+  const labelMat = new THREE.MeshStandardMaterial({ map: tex, bumpMap: tex, bumpScale: 0.6, roughness: 0.78, metalness: 0, envMapIntensity: 0.5 });
   const label = new THREE.Mesh(labelGeo(t, st.label.arc, st.label.h), labelMat);
   label.position.y = st.label.y;
   label.renderOrder = 3;
@@ -231,9 +303,9 @@ export async function init(canvas, callbacks) {
   scene = new THREE.Scene();
   scene.background = new THREE.Color(BG);
   scene.fog = new THREE.Fog(BG, 650, 1500);
-  const pmrem = new THREE.PMREMGenerator(renderer);
-  envTex = pmrem.fromScene(new RoomEnvironment(renderer), 0.04).texture;
+  envTex = studioEnvironment(renderer);
   scene.environment = envTex;
+  glassEnv = studioEnvironment(renderer, 4);
 
   camera = new THREE.PerspectiveCamera(FOV, 1, 1, 3000);
   scene.add(camera);
@@ -255,7 +327,14 @@ export async function init(canvas, callbacks) {
   floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true;
   scene.add(floor);
 
-  dimPlane = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ color: BG, transparent: true, opacity: 0, depthWrite: false }));
+  // Fond de studio crème derrière la bouteille sélectionnée (léger dégradé)
+  const bd = document.createElement("canvas"); bd.width = bd.height = 512;
+  const bx = bd.getContext("2d");
+  const bg = bx.createRadialGradient(256, 210, 20, 256, 256, 380);
+  bg.addColorStop(0, "#fbf8f2"); bg.addColorStop(0.55, "#f3ede3"); bg.addColorStop(1, "#e6dccd");
+  bx.fillStyle = bg; bx.fillRect(0, 0, 512, 512);
+  const bdTex = new THREE.CanvasTexture(bd); bdTex.colorSpace = THREE.SRGBColorSpace;
+  dimPlane = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: bdTex, transparent: true, opacity: 0, depthWrite: false, toneMapped: false, fog: false }));
   dimPlane.visible = false;
   camera.add(dimPlane);
 
@@ -392,13 +471,38 @@ function focusTarget() {
   const D = 30 / (1.3 * TAN), h = D * TAN;
   return new THREE.Vector3(cam.x - 0.3 * h * camera.aspect, cam.y - 15.5, cam.z - D);
 }
+function setDimSolid(solid) {
+  // opaque une fois en place : le vin translucide « voit » alors ce fond crème
+  if (dimPlane.material.transparent === !solid) return;
+  dimPlane.material.transparent = !solid;
+  dimPlane.material.depthWrite = solid;
+  dimPlane.material.needsUpdate = true;
+}
 function showDim(D) {
-  const d = D + 22, h = 2 * d * TAN * 1.4;
-  dimPlane.scale.set(h * camera.aspect * 1.4, h, 1);
+  const d = D + 22, h = 2 * d * TAN * 1.15;
+  dimPlane.scale.set(h * camera.aspect * 1.15, h, 1);
   dimPlane.position.set(0, 0, -d);
+  setDimSolid(false);
   dimPlane.visible = true;
 }
-function hideDim(now) { if (now) { dimPlane.material.opacity = 0; dimPlane.visible = false; } }
+function hideDim(now) { if (now) { setDimSolid(false); dimPlane.material.opacity = 0; dimPlane.visible = false; } }
+
+let focusShadow = null;
+function attachShadow(b) {
+  if (!focusShadow) {
+    focusShadow = new THREE.Mesh(new THREE.PlaneGeometry(17, 17), shadowBlobMat.clone());
+    focusShadow.rotation.x = -Math.PI / 2;
+    focusShadow.position.y = 0.03;
+    focusShadow.renderOrder = 1;
+  }
+  focusShadow.material.opacity = 0;
+  b.add(focusShadow);
+}
+function setLabelRes(b, res) {
+  const t = labelTexture(b.userData.w, res);
+  b.userData.labelMat.map = t; b.userData.labelMat.bumpMap = t;
+  b.userData.labelMat.needsUpdate = true;
+}
 
 export async function focus(wineId, idx) {
   let b = bottles.find((g) => g.userData.idx === idx && g.userData.wineId === wineId) || bottles.find((g) => g.userData.wineId === wineId);
@@ -422,8 +526,8 @@ export async function focus(wineId, idx) {
   const ctrl = start.clone().add(new THREE.Vector3(0, 6, 26));
   const D = camera.position.z - end.z;
   showDim(D);
-  b.userData.labelMat.map = labelTexture(b.userData.w, HI_RES);
-  b.userData.labelMat.needsUpdate = true;
+  setLabelRes(b, HI_RES);
+  attachShadow(b);
   spin = 0; spinVel = 0;
   const q = new THREE.Vector3();
   await tween(1.05, (e) => {
@@ -431,8 +535,10 @@ export async function focus(wineId, idx) {
     q.set(0, 0, 0).addScaledVector(start, u * u).addScaledVector(ctrl, 2 * u * e).addScaledVector(end, e * e);
     b.position.copy(q);
     b.rotation.y = r0 * (1 - e) + Math.sin(e * Math.PI) * 0.6;
-    dimPlane.material.opacity = 0.86 * e;
+    dimPlane.material.opacity = e;
+    focusShadow.material.opacity = Math.max(0, e * 1.6 - 0.6);
   });
+  setDimSolid(true);
   b.userData.focusBase = end.clone();
   lastInteract = performance.now();
   mode = "focus";
@@ -445,6 +551,7 @@ export async function unfocus() {
   const home = bottleRoot.localToWorld(b.userData.home.pos.clone().add(new THREE.Vector3(0, 0, b.userData.push || 0)));
   const start = b.position.clone(), r0 = b.rotation.y % (Math.PI * 2);
   const ctrl = home.clone().add(new THREE.Vector3(0, 6, 26));
+  setDimSolid(false);
   const op = dimPlane.material.opacity;
   const q = new THREE.Vector3();
   await tween(0.85, (e) => {
@@ -453,12 +560,13 @@ export async function unfocus() {
     b.position.copy(q);
     b.rotation.y = r0 + (b.userData.home.rotY - r0) * e;
     dimPlane.material.opacity = op * (1 - e);
+    if (focusShadow) focusShadow.material.opacity = 1 - Math.min(1, e * 3);
   });
+  if (focusShadow) b.remove(focusShadow);
   bottleRoot.attach(b);
   b.position.copy(b.userData.home.pos); b.position.z += b.userData.push || 0;
   b.rotation.set(0, b.userData.home.rotY, 0);
-  b.userData.labelMat.map = labelTexture(b.userData.w, LOW_RES);
-  b.userData.labelMat.needsUpdate = true;
+  setLabelRes(b, LOW_RES);
   hideDim(true);
   focused = null;
   mode = "cabinet";
@@ -469,6 +577,8 @@ export async function dropFocused() {
   if (!focused) return;
   const b = focused;
   mode = "to-cabinet";
+  setDimSolid(false);
+  if (focusShadow) b.remove(focusShadow);
   const p0 = b.position.clone(), op = dimPlane.material.opacity;
   await tween(0.7, (e) => {
     b.position.y = p0.y + 18 * e;
@@ -569,7 +679,7 @@ function loop(now) {
     if (idle > 2.5) { const home = Math.round(spin / (Math.PI * 2)) * Math.PI * 2; spin += (home - spin) * 0.035; }
     const sway = idle > 1.5 ? Math.sin((idle - 1.5) * 0.7) * 0.3 * Math.min(1, idle - 1.5) : 0;
     focused.rotation.y = spin + sway;
-    focused.position.y = focused.userData.focusBase.y + Math.sin(time * 1.1) * 0.35;
+    focused.position.y = focused.userData.focusBase.y;
   }
   if (!currentPose) currentPose = overviewPose();
   const moving = mode !== "cabinet" || active || dirty;

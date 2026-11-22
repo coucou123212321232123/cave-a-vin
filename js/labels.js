@@ -145,7 +145,7 @@ const STYLES = {
     match: (w) => norm(w.domaine).includes("chanzy"),
     habit: (w) => w.color === "R"
       ? { bottle: "burgundy", glass: "dark", capsule: { color: "#141414", metal: .3, rough: .45 } }
-      : { bottle: "burgundy", glass: "flint", wine: "#b98d22", capsule: { color: "#ede7d8", metal: .1, rough: .5 } },
+      : { bottle: "burgundy", glass: "flint", wine: "#ebd98a", capsule: { color: "#ede7d8", metal: .1, rough: .5 } },
     label: { arc: 175, h: 11.2, y: 9.4 },
     draw(x, W, H, w) {
       paper(x, W, H, "#fbfaf6", .02);
@@ -181,7 +181,7 @@ const STYLES = {
 
   beauregard: {
     match: (w) => norm(w.domaine).includes("beauregard"),
-    habit: () => ({ bottle: "burgundy", glass: "antique", capsule: { color: "#2b2620", metal: .55, rough: .35, top: "#b0904f" } }),
+    habit: () => ({ bottle: "burgundy", glass: "antique", wine: "#e3c66c", capsule: { color: "#2b2620", metal: .55, rough: .35, top: "#b0904f" } }),
     label: { arc: 150, h: 10.6, y: 8.6 },
     draw(x, W, H, w) {
       paper(x, W, H, "#f1e8d3", .05);
@@ -236,7 +236,7 @@ const STYLES = {
 
   rolet: {
     match: (w) => norm(w.domaine).includes("rolet"),
-    habit: () => ({ bottle: "jura", glass: "amber", capsule: { color: "#8a5a3a", metal: .6, rough: .35 } }),
+    habit: () => ({ bottle: "jura", glass: "amber", wine: "#ddb466", capsule: { color: "#8a5a3a", metal: .6, rough: .35 } }),
     label: { arc: 140, h: 10.4, y: 8.8 },
     draw(x, W, H, w) {
       paper(x, W, H, "#f4f0e6", .03);
@@ -278,7 +278,7 @@ const STYLES = {
 
   cornin: {
     match: (w) => norm(w.domaine).includes("cornin"),
-    habit: () => ({ bottle: "burgundy", glass: "flint", wine: "#c9a53c", capsule: { color: "#e4e2dc", metal: .35, rough: .4 } }),
+    habit: () => ({ bottle: "burgundy", glass: "flint", wine: "#ecdc93", capsule: { color: "#e4e2dc", metal: .35, rough: .4 } }),
     label: { arc: 140, h: 10.6, y: 9 },
     draw(x, W, H, w) {
       paper(x, W, H, "#fbfaf7", .02);
@@ -303,7 +303,7 @@ const STYLES = {
     match: () => true,
     habit: (w) => w.color === "R"
       ? { bottle: "burgundy", glass: "dark", capsule: { color: "#6e1424", metal: .5, rough: .35 } }
-      : { bottle: "burgundy", glass: "antique", capsule: { color: "#c2a061", metal: .6, rough: .35 } },
+      : { bottle: "burgundy", glass: "antique", wine: "#e3c66c", capsule: { color: "#c2a061", metal: .6, rough: .35 } },
     label: { arc: 145, h: 10.4, y: 8.8 },
     draw(x, W, H, w) {
       paper(x, W, H, "#f3ecdd", .04);
