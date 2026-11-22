@@ -72,9 +72,21 @@ const JURA_PROFILE = [
   [20.55, 2.28], [21.05, 2.1], [21.56, 1.95], [22.06, 1.83], [22.56, 1.72], [23.06, 1.62], [23.56, 1.55],
   [24.06, 1.51], [24.56, 1.47], [25.07, 1.45], [25.57, 1.44],
 ];
+// Bordelaise : corps droit et haut, épaule courte et marquée
+const BORDEAUX_SHOULDER = [
+  [22.2, 3.71], [22.7, 3.6], [23.1, 3.4], [23.5, 3.08], [23.85, 2.7], [24.15, 2.3], [24.45, 1.95],
+  [24.8, 1.68], [25.1, 1.53], [25.4, 1.46],
+];
 const SHAPES = {
   burgundy: { R: 4.0, body: 10.9, neck: 23.6, RN: 1.43, top: 29.6, profile: BURGUNDY_SHOULDER },
   jura: { R: 3.87, body: 0, neck: 24.6, RN: 1.43, top: 30.4, profile: JURA_PROFILE, emboss: [15.2, 19.4] },
+  bordeaux: { R: 3.75, body: 21.6, neck: 25.4, RN: 1.45, top: 30.6, profile: BORDEAUX_SHOULDER },
+  // flûte d'Alsace / de Provence : haute et fine, longue pente jusqu'au col
+  alsace: { R: 3.75, body: 12.5, neck: 27.8, RN: 1.38, top: 34.2 },
+  // champenoise : large, verre épais, épaule longue
+  champagne: { R: 4.4, body: 12.5, neck: 23.2, RN: 1.55, top: 29.8 },
+  // clavelin (62 cl, vin jaune) : trapu, épaule haute et franche
+  clavelin: { R: 4.05, body: 12.2, neck: 16.6, RN: 1.45, top: 23.6 },
 };
 
 function outline(type) {
@@ -203,7 +215,7 @@ function capMat(c) {
 }
 
 function labelKey(w, res) {
-  return [res, w.domaine, w.appellation, w.cuvee, w.vintage, w.color].join("|");
+  return [res, w.domaine, w.appellation, w.cuvee, w.vintage, w.color, w.bottle || "", w.photo ? w.id + "@" + w.photo.v : ""].join("|");
 }
 // Étiquette → textures. Une étiquette « découpée » (blason qui dépasse) est séparée en deux textures :
 // le rectangle, sans aucune transparence (bord parfaitement net), et la bande du haut avec le blason.

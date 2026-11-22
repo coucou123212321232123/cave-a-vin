@@ -8,6 +8,13 @@ export const F = {
   sans: '"Inter", Arial, sans-serif',
 };
 
+import { shapeFor, LABEL_ZONE } from "./appellations.js";
+
+// Photos d'étiquettes prises dans l'appli (id du vin → image recadrée et mise à plat)
+export const PHOTOS = new Map();
+// Arc couvert sur la bouteille par une étiquette photographiée (degrés)
+export const PHOTO_ARC = 110;
+
 // Images officielles (site de la Maison Chanzy) : blason découpé et logotype
 const IMG = {};
 // Vraies étiquettes Chanzy, photographiées sur chanzy.com puis « déroulées » à plat.
@@ -168,7 +175,36 @@ function chanzyFallback(x, W, H, w) { return STYLES.chanzyOld.draw(x, W, H, w); 
 /* ——————————— styles par domaine ——————————— */
 const BLUE_INK = "#2c4a86";
 
+// Habillage selon la forme de la bouteille et la couleur du vin
+function genericHabit(w) {
+  const bottle = shapeFor(w), red = w.color === "R";
+  const cap = red ? { color: "#6e1424", metal: .5, rough: .35 } : { color: "#c2a061", metal: .6, rough: .35 };
+  if (bottle === "champagne") return { bottle, glass: "dark", capsule: { color: "#c9a95c", metal: .75, rough: .3 } };
+  if (red) return { bottle, glass: "dark", capsule: cap };
+  if (bottle === "bordeaux") return { bottle, glass: "flint", wine: "#efe0a0", capsule: cap };
+  if (bottle === "jura") return { bottle, glass: "flint", wine: "#e4c56a", capsule: { color: "#dca22c", metal: .3, rough: .38 } };
+  if (bottle === "clavelin") return { bottle, glass: "flint", wine: "#d9a43c", capsule: { color: "#1d1b18", metal: .4, rough: .4 } };
+  return { bottle, glass: "antique", wine: "#e3c66c", capsule: cap };
+}
+
 const STYLES = {
+  // Étiquette photographiée dans l'appli : prioritaire sur tous les autres styles
+  photo: {
+    match: (w) => !!(w.photo && PHOTOS.has(w.id)),
+    habit: (w) => { const s = STYLES[Object.keys(STYLES).find((k) => k !== "photo" && STYLES[k].match(w))]; return s.habit(w); },
+    label(w) {
+      const z = LABEL_ZONE[shapeFor(w)];
+      let arc = PHOTO_ARC, h = (arc * Math.PI / 180) * 4.05 / (w.photo.r || 1.2);
+      // trop haute pour la bouteille : on réduit l'étiquette en gardant ses proportions
+      if (h > z.max) { arc *= z.max / h; h = z.max; }
+      if (h < 3) h = 3;
+      return { arc, h, y: Math.max(z.y, 1.3 + h / 2) };
+    },
+    draw(x, W, H, w) {
+      x.imageSmoothingQuality = "high";
+      x.drawImage(PHOTOS.get(w.id), 0, 0, W, H);
+    },
+  },
   chanzy: {
     match: (w) => norm(w.domaine).includes("chanzy"),
     habit: (w) => w.color === "R"
@@ -386,10 +422,8 @@ const STYLES = {
 
   generic: {
     match: () => true,
-    habit: (w) => w.color === "R"
-      ? { bottle: "burgundy", glass: "dark", capsule: { color: "#6e1424", metal: .5, rough: .35 } }
-      : { bottle: "burgundy", glass: "antique", wine: "#e3c66c", capsule: { color: "#c2a061", metal: .6, rough: .35 } },
-    label: { arc: 145, h: 8.4, y: 6.5 },
+    habit: genericHabit,
+    label: (w) => { const z = LABEL_ZONE[shapeFor(w)]; return { arc: 145, h: Math.min(8.4, z.max), y: z.y }; },
     draw(x, W, H, w) {
       paper(x, W, H, "#f3ecdd", .04);
       const u = H / 100, cx = W / 2, ink = "#2e241c", acc = w.color === "R" ? "#7d1626" : "#8a6a33";
@@ -412,7 +446,10 @@ const STYLES = {
 export function styleFor(w) {
   const key = Object.keys(STYLES).find((k) => STYLES[k].match(w));
   const s = STYLES[key];
-  return { key, ...s.habit(w), label: typeof s.label === "function" ? s.label(w) : s.label, draw: s.draw };
+  const habit = s.habit(w);
+  // forme choisie à la main dans le formulaire
+  if (w.bottle && LABEL_ZONE[w.bottle]) habit.bottle = w.bottle;
+  return { key, ...habit, label: typeof s.label === "function" ? s.label(w) : s.label, draw: s.draw };
 }
 
 // Dessine l'étiquette à la bonne proportion (largeur = arc déroulé)

@@ -1,4 +1,7 @@
 import { SEED } from "./data.js";
+import { appellationInfo, APPELLATION_NAMES, SHAPE_NAMES, shapeFor } from "./appellations.js";
+import * as Photos from "./photos.js";
+import { PHOTOS } from "./labels.js";
 
 const STORE_KEY = "cave-camille-v1";
 const YEAR = new Date().getFullYear();
@@ -7,6 +10,7 @@ const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const norm = (s) => String(s ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+const copyCanvas = (c) => { const o = document.createElement("canvas"); o.width = c.width; o.height = c.height; o.getContext("2d").drawImage(c, 0, 0); return o; };
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
 
 /* ————————————————— État ————————————————— */
@@ -56,17 +60,16 @@ function status(w) {
 const NORM = (s) => String(s ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 function gardeMax(w) {
   const a = NORM(w.appellation), c = NORM(w.cuvee), vv = c.includes("vieilles vignes");
-  let r;
-  if (a.includes("vosne") || a.includes("nuits") || a.includes("chambertin") || a.includes("vougeot")) r = [15, 20];
-  else if (a.includes("pouilly-fuisse")) r = a.includes("1er cru") ? [10, 15] : [8, 12];
-  else if (a.includes("mercurey") || a.includes("rully") || a.includes("givry")) r = a.includes("1er cru") ? [8, 12] : [6, 9];
-  else if (a.includes("bouzeron")) r = c.includes("fortune") ? (vv ? [8, 12] : [7, 10]) : [6, 9];
-  else if (a.includes("jura") || a.includes("arbois")) r = [10, 15];
-  else if (a.includes("julienas") || a.includes("morgon") || a.includes("moulin")) r = vv ? [8, 12] : [6, 10];
-  else if (a.includes("brouilly")) r = [8, 12];
-  else if (a.includes("saint-veran") || a.includes("macon")) r = [5, 8];
-  else r = w.color === "R" ? [8, 12] : [5, 8];
-  return r;
+  if (a.includes("bouzeron")) return c.includes("fortune") ? (vv ? [8, 12] : [7, 10]) : [6, 9];
+  const info = appellationInfo(w.appellation);
+  if (info) {
+    const r = info.garde || info.regionGarde[w.color === "B" ? "B" : "R"];
+    // un premier cru ou des vieilles vignes se gardent un peu plus longtemps
+    if (/\b(1er|premier) cru\b/.test(a) && !info.key.includes("cru")) return [r[0] + 2, r[1] + 3];
+    if (vv) return [r[0] + 2, r[1] + 2];
+    return r;
+  }
+  return w.color === "R" ? [8, 12] : [5, 8];
 }
 function gardeMaxHTML(w) {
   const [m, n] = gardeMax(w);
@@ -116,9 +119,22 @@ let S = null;
 const setMode = (m) => { document.body.dataset.mode = m; };
 const mode = () => document.body.dataset.mode;
 
+// Photos d'étiquettes rangées sur l'appareil ; celles des bouteilles disparues sont supprimées
+async function loadPhotos() {
+  try {
+    const all = await Photos.all();
+    const ids = new Set(state.wines.filter((w) => w.photo).map((w) => w.id));
+    await Promise.all([...all].map(async ([id, blob]) => {
+      if (!ids.has(id)) { await Photos.del(id); return; }
+      try { PHOTOS.set(id, await Photos.blobToImage(blob)); } catch {}
+    }));
+  } catch {}
+}
+
 async function boot() {
   renderStats();
   renderList();
+  const photosReady = loadPhotos();
   try {
     S = await import("./scene.js");
     await S.init($("#scene"), {
@@ -126,6 +142,7 @@ async function boot() {
       onBottleTap: (id, idx) => openBottle(id, idx),
       onBackgroundTap: () => { if (mode() === "bottle") back(); },
     });
+    await photosReady;
     S.setWines(layout());
     S.setFilter(matchesFilter);
     await new Promise((r) => setTimeout(r, 350));
@@ -336,15 +353,170 @@ function toast(msg, action) {
   toastTimer = setTimeout(() => t.classList.remove("on"), action ? 5500 : 2400);
 }
 
+/* ————————————————— Recadrage de l'étiquette ————————————————— */
+// Plein écran : on place soi-même les 4 coins de l'étiquette (+ 2 poignées au milieu
+// des bords du haut et du bas pour suivre la courbure), puis elle est mise à plat.
+function cropLabel(file) {
+  return new Promise(async (resolve) => {
+    let src;
+    try { src = await Photos.loadPhoto(file); } catch { toast("Photo illisible"); resolve(null); return; }
+    let curved = true, done = false;
+    const el = document.createElement("div");
+    el.className = "crop";
+    el.innerHTML = `
+      <div class="crop-top">
+        <button data-a="cancel">Annuler</button>
+        <p>Placez les coins sur les bords de l'étiquette.<br>Les points du milieu suivent sa courbure.</p>
+        <button data-a="rotate" aria-label="Tourner">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg>
+        </button>
+      </div>
+      <div class="crop-stage">
+        <canvas class="src"></canvas>
+        <svg><path fill="rgba(0,0,0,.55)" fill-rule="evenodd"/><path class="edge" fill="none" stroke="#fff" stroke-width="1.5"/></svg>
+        ${["tl", "tm", "tr", "br", "bm", "bl"].map((k) => `<div class="crop-h${k[1] === "m" ? " mid" : ""}" data-k="${k}"></div>`).join("")}
+        <canvas class="crop-loupe" width="232" height="232"></canvas>
+      </div>
+      <div class="crop-bottom">
+        <div class="crop-seg">
+          <button data-c="1" class="on">Sur la bouteille</button>
+          <button data-c="0">Étiquette à plat</button>
+        </div>
+        <div class="crop-prev"><canvas></canvas><button class="btn btn-wine" data-a="ok">Valider</button></div>
+      </div>`;
+    document.body.appendChild(el);
+    requestAnimationFrame(() => el.classList.add("on"));
+    const stage = $(".crop-stage", el), view = $("canvas.src", el), [shade, edge] = $$(".crop-stage svg path", el);
+    const loupe = $(".crop-loupe", el), prev = $(".crop-prev canvas", el);
+    let q, sc = 1, ox = 0, oy = 0;
+
+    const reset = () => {
+      const w = src.width, h = src.height;
+      q = { tl: { x: w * .15, y: h * .25 }, tr: { x: w * .85, y: h * .25 }, bl: { x: w * .15, y: h * .75 }, br: { x: w * .85, y: h * .75 } };
+      q.tm = { x: w / 2, y: h * .25 }; q.bm = { x: w / 2, y: h * .75 };
+    };
+    const layout = () => {
+      const r = stage.getBoundingClientRect();
+      sc = Math.min(r.width / src.width, r.height / src.height);
+      const w = src.width * sc, h = src.height * sc;
+      ox = (r.width - w) / 2; oy = (r.height - h) / 2;
+      const dpr = Math.min(2, devicePixelRatio || 1);
+      view.width = Math.round(w * dpr); view.height = Math.round(h * dpr);
+      Object.assign(view.style, { left: ox + "px", top: oy + "px", width: w + "px", height: h + "px" });
+      view.getContext("2d").drawImage(src, 0, 0, view.width, view.height);
+      draw();
+    };
+    const P = (p) => [ox + p.x * sc, oy + p.y * sc];
+    // bord courbe : courbe de Bézier qui passe par la poignée du milieu
+    const curve = (a, m, b) => {
+      const c = { x: 2 * m.x - (a.x + b.x) / 2, y: 2 * m.y - (a.y + b.y) / 2 };
+      return `Q${P(c).join(" ")} ${P(b).join(" ")}`;
+    };
+    const draw = () => {
+      const r = stage.getBoundingClientRect();
+      const shape = `M${P(q.tl).join(" ")} ${curve(q.tl, q.tm, q.tr)} L${P(q.br).join(" ")} ${curve(q.br, q.bm, q.bl)} Z`;
+      shade.setAttribute("d", `M0 0H${r.width}V${r.height}H0Z ${shape}`);
+      edge.setAttribute("d", shape);
+      for (const h of $$(".crop-h", el)) { const [x, y] = P(q[h.dataset.k]); h.style.left = x + "px"; h.style.top = y + "px"; }
+    };
+    const preview = () => {
+      const { canvas } = Photos.unwrap(src, q, curved, 320);
+      prev.width = canvas.width; prev.height = canvas.height;
+      prev.getContext("2d").drawImage(canvas, 0, 0);
+    };
+    const showLoupe = (p) => {
+      const [x, y] = P(p), R = 58, z = 2.6;
+      const k = 1 / sc / z;   // pixels source par pixel de loupe
+      loupe.style.display = "block";
+      loupe.style.left = Math.max(-10, x - R) + "px";
+      loupe.style.top = (y - R * 2 - 34 < 0 ? y + 34 : y - R * 2 - 34) + "px";
+      const c = loupe.getContext("2d"), s = loupe.width;
+      c.fillStyle = "#000"; c.fillRect(0, 0, s, s);
+      c.drawImage(src, p.x - (R * k), p.y - (R * k), 2 * R * k, 2 * R * k, 0, 0, s, s);
+      c.strokeStyle = "rgba(255,255,255,.9)"; c.lineWidth = 2;
+      c.beginPath(); c.moveTo(s / 2, s / 2 - 18); c.lineTo(s / 2, s / 2 + 18); c.moveTo(s / 2 - 18, s / 2); c.lineTo(s / 2 + 18, s / 2); c.stroke();
+    };
+
+    // glisser une poignée (décalage conservé : la poignée ne saute pas sous le doigt)
+    for (const h of $$(".crop-h", el)) {
+      let d = null;
+      h.addEventListener("pointerdown", (e) => {
+        e.preventDefault(); try { h.setPointerCapture(e.pointerId); } catch {}
+        h.classList.add("active");
+        const p = q[h.dataset.k];
+        d = { x: e.clientX, y: e.clientY, px: p.x, py: p.y };
+        showLoupe(p);
+      });
+      h.addEventListener("pointermove", (e) => {
+        if (!d) return;
+        const k = h.dataset.k, p = q[k];
+        const nx = Math.max(0, Math.min(src.width, d.px + (e.clientX - d.x) / sc));
+        const ny = Math.max(0, Math.min(src.height, d.py + (e.clientY - d.y) / sc));
+        const dx = nx - p.x, dy = ny - p.y;
+        p.x = nx; p.y = ny;
+        // un coin entraîne la moitié de la poignée du milieu de son bord
+        if (k[1] !== "m") { const m = q[k[0] + "m"]; m.x += dx / 2; m.y += dy / 2; }
+        draw(); showLoupe(p);
+      });
+      const end = () => { if (!d) return; d = null; h.classList.remove("active"); loupe.style.display = "none"; preview(); };
+      h.addEventListener("pointerup", end);
+      h.addEventListener("pointercancel", end);
+    }
+
+    const close = (result) => {
+      if (done) return;
+      done = true;
+      window.removeEventListener("resize", layout);
+      el.classList.remove("on");
+      setTimeout(() => el.remove(), 260);
+      resolve(result);
+    };
+    push(() => close(null));   // bouton retour du téléphone = annuler
+    el.addEventListener("click", (e) => {
+      const b = e.target.closest("button");
+      if (!b) return;
+      if (b.dataset.a === "cancel") back();
+      else if (b.dataset.a === "rotate") { src = Photos.rotate90(src); reset(); layout(); preview(); }
+      else if (b.dataset.c) {
+        curved = b.dataset.c === "1";
+        $$(".crop-seg button", el).forEach((x) => x.classList.toggle("on", x === b));
+        preview();
+      } else if (b.dataset.a === "ok") {
+        const { canvas, ratio } = Photos.unwrap(src, q, curved, 1100);
+        Photos.autoLevels(canvas);
+        neutralizeTop(); back();
+        close({ canvas, ratio });
+      }
+    });
+    window.addEventListener("resize", layout);
+    reset();
+    requestAnimationFrame(() => { layout(); preview(); });
+  });
+}
+
 /* ————————————————— Formulaire ————————————————— */
 function openForm(w) {
   const isNew = !w;
   const d = w || { domaine: "", appellation: "", cuvee: "", vintage: YEAR - 2, color: "R", qty: 1, region: "", garde: null, notes: "" };
   let color = d.color, qty = d.qty;
+  // étiquette : null = inchangée, "remove" = retirée, { canvas, ratio } = nouvelle photo recadrée
+  let photo = null;
+  const hasPhoto = () => (photo && photo !== "remove") || (photo !== "remove" && w?.photo && PHOTOS.has(w.id));
   const uniq = (f) => [...new Set(state.wines.map(f).filter(Boolean))].sort();
+  const apps = [...new Set([...uniq((x) => x.appellation), ...APPELLATION_NAMES])];
   openSheet(`
     <form class="form" id="f">
       <h2>${isNew ? "Nouvelle bouteille" : "Modifier"}</h2>
+      <div class="field"><label>Étiquette</label>
+        <div class="lab-pick">
+          <div class="lab-thumb" id="f-thumb"></div>
+          <div class="lab-actions">
+            <button type="button" class="btn btn-ghost" id="f-photo"></button>
+            <button type="button" class="btn btn-danger" id="f-photo-del">Retirer la photo</button>
+          </div>
+        </div>
+        <input type="file" id="f-file" accept="image/*" hidden>
+      </div>
       <div class="field"><label>Domaine</label><input name="domaine" list="dl-dom" required value="${esc(d.domaine)}" autocomplete="off"></div>
       <div class="field"><label>Appellation</label><input name="appellation" list="dl-app" required value="${esc(d.appellation)}" autocomplete="off"></div>
       <div class="field"><label>Cuvée <span style="color:var(--faint)">(facultatif)</span></label><input name="cuvee" value="${esc(d.cuvee)}" autocomplete="off"></div>
@@ -358,6 +530,12 @@ function openForm(w) {
           <button type="button" data-c="R" class="${color === "R" ? "on" : ""}"><i style="background:var(--rouge)"></i>Rouge</button>
         </div>
       </div>
+      <div class="field"><label>Forme de la bouteille</label>
+        <select name="bottle" id="f-bottle">
+          <option value="">Automatique</option>
+          ${Object.entries(SHAPE_NAMES).map(([k, v]) => `<option value="${k}"${d.bottle === k ? " selected" : ""}>${esc(v)}</option>`).join("")}
+        </select>
+      </div>
       <div class="field"><label>Nombre de bouteilles</label>
         <div class="stepper"><button type="button" data-q="-1">−</button><output id="f-qty">${qty}</output><button type="button" data-q="1">+</button></div>
       </div>
@@ -370,15 +548,50 @@ function openForm(w) {
       <button class="btn btn-primary mt" type="submit">${isNew ? "Ajouter à la cave" : "Enregistrer"}</button>
       ${isNew ? "" : `<button class="btn btn-danger mt" type="button" id="f-del">Retirer de la cave</button>`}
       <datalist id="dl-dom">${uniq((x) => x.domaine).map((x) => `<option value="${esc(x)}">`).join("")}</datalist>
-      <datalist id="dl-app">${uniq((x) => x.appellation).map((x) => `<option value="${esc(x)}">`).join("")}</datalist>
+      <datalist id="dl-app">${apps.map((x) => `<option value="${esc(x)}">`).join("")}</datalist>
       <datalist id="dl-reg">${uniq((x) => x.region).map((x) => `<option value="${esc(x)}">`).join("")}</datalist>
     </form>`);
 
   const f = $("#f");
-  $$(".color-pick button", f).forEach((b) => (b.onclick = () => {
-    color = b.dataset.c;
-    $$(".color-pick button", f).forEach((x) => x.classList.toggle("on", x === b));
-  }));
+  const setColor = (c) => {
+    color = c;
+    $$(".color-pick button", f).forEach((x) => x.classList.toggle("on", x.dataset.c === c));
+  };
+  let colorTouched = !isNew;
+  $$(".color-pick button", f).forEach((b) => (b.onclick = () => { colorTouched = true; setColor(b.dataset.c); }));
+
+  // Étiquette : vignette + boutons
+  const renderPhoto = () => {
+    const th = $("#f-thumb");
+    th.innerHTML = "";
+    if (photo && photo !== "remove") th.appendChild(photo.canvas);
+    else if (hasPhoto()) { const c = PHOTOS.get(w.id); th.appendChild(c instanceof HTMLCanvasElement ? copyCanvas(c) : c.cloneNode()); }
+    else th.innerHTML = `<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-2.5h6L17 8h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>`;
+    $("#f-photo").textContent = hasPhoto() ? "Reprendre la photo" : "Photographier l'étiquette";
+    $("#f-photo-del").hidden = !hasPhoto();
+  };
+  renderPhoto();
+  $("#f-photo").onclick = () => { $("#f-file").value = ""; $("#f-file").click(); };
+  $("#f-file").onchange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const r = await cropLabel(file);
+    if (r) { photo = r; renderPhoto(); }
+  };
+  $("#f-photo-del").onclick = () => { photo = "remove"; renderPhoto(); };
+
+  // Appellation reconnue : région, couleur et forme se remplissent toutes seules
+  const appIn = f.elements.appellation, regIn = f.elements.region, shapeSel = $("#f-bottle");
+  let autoRegion = isNew ? "" : null;
+  const onApp = () => {
+    const info = appellationInfo(appIn.value);
+    shapeSel.options[0].textContent = `Automatique — ${SHAPE_NAMES[info?.shape || "burgundy"]}`;
+    if (!info) return;
+    if (autoRegion !== null && (regIn.value === "" || regIn.value === autoRegion)) { regIn.value = info.region; autoRegion = info.region; }
+    if (!colorTouched && info.color) setColor(info.color);
+  };
+  appIn.addEventListener("input", onApp);
+  onApp();
   $$(".stepper button", f).forEach((b) => (b.onclick = () => {
     qty = Math.max(1, Math.min(99, qty + Number(b.dataset.q)));
     $("#f-qty").textContent = qty;
@@ -390,8 +603,11 @@ function openForm(w) {
     else then();
   });
 
-  f.onsubmit = (e) => {
+  let saving = false;
+  f.onsubmit = async (e) => {
     e.preventDefault();
+    if (saving) return;
+    saving = true;
     const fd = new FormData(f);
     const num = (v) => (v === "" || v == null ? null : Number(v));
     const g0 = num(fd.get("g0")), g1 = num(fd.get("g1"));
@@ -399,10 +615,22 @@ function openForm(w) {
       domaine: fd.get("domaine").trim(), appellation: fd.get("appellation").trim(), cuvee: fd.get("cuvee").trim(),
       vintage: num(fd.get("vintage")), region: fd.get("region").trim(), color, qty,
       garde: g0 && g1 ? [Math.min(g0, g1), Math.max(g0, g1)] : null,
+      bottle: fd.get("bottle") || null,
     };
-    let id;
-    if (isNew) { id = uid(); state.wines.push({ id, notes: "", ...data }); }
-    else { Object.assign(w, data); id = w.id; }
+    const id = isNew ? uid() : w.id;
+    // la photo est rangée sur l'appareil (IndexedDB), la fiche ne garde que sa version et ses proportions
+    if (photo === "remove") {
+      data.photo = null; PHOTOS.delete(id);
+      Photos.del(id).catch(() => {});
+    } else if (photo) {
+      try {
+        await Photos.put(id, await Photos.toBlob(photo.canvas));
+        PHOTOS.set(id, photo.canvas);
+        data.photo = { v: Date.now(), r: +photo.ratio.toFixed(4) };
+      } catch { toast("La photo n'a pas pu être enregistrée"); }
+    }
+    if (isNew) state.wines.push({ id, notes: "", ...data });
+    else Object.assign(w, data);
     save();
     leave(() => {
       renderAll();
@@ -441,7 +669,13 @@ function openSettings() {
 
   $("#s-export").onclick = async () => {
     const name = `cave-${new Date().toISOString().slice(0, 10)}.json`;
-    const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
+    // les photos d'étiquettes voyagent avec la sauvegarde
+    const labels = {};
+    for (const w of state.wines) {
+      if (!w.photo) continue;
+      try { const b = await Photos.get(w.id); if (b) labels[w.id] = await Photos.blobToDataURL(b); } catch {}
+    }
+    const blob = new Blob([JSON.stringify({ ...state, labels }, null, 2)], { type: "application/json" });
     const file = new File([blob], name, { type: "application/json" });
     if (navigator.canShare?.({ files: [file] })) {
       try { await navigator.share({ files: [file], title: "Sauvegarde de la cave" }); return; } catch (e) { if (e.name === "AbortError") return; }
@@ -458,6 +692,9 @@ function openSettings() {
       const data = JSON.parse(await file.text());
       if (!Array.isArray(data.wines)) throw new Error();
       state = { wines: data.wines.map((w) => ({ id: w.id || uid(), notes: "", ...w })), history: data.history || [], seedHash: SEED_HASH };
+      for (const [id, url] of Object.entries(data.labels || {})) {
+        try { const b = await Photos.dataURLToBlob(url); await Photos.put(id, b); PHOTOS.set(id, await Photos.blobToImage(b)); } catch {}
+      }
       save(); back(() => { renderAll(); toast("Sauvegarde importée"); });
     } catch { toast("Fichier invalide"); }
   };

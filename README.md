@@ -17,7 +17,24 @@ Petite appli (PWA) pour visualiser la cave à vin depuis un téléphone : cave e
 | `css/styles.css` | Thème et animations |
 | `assets/` | Vraies étiquettes Chanzy (photos de chanzy.com mises à plat), blason et logo |
 
-Une bouteille d'un domaine inconnu reçoit une étiquette sobre générique. Pour lui faire une étiquette dédiée, ajouter une entrée dans `STYLES` de `js/labels.js`.
+## Ajouter une bouteille avec sa vraie étiquette
+
+1. Bouton **+** → **Photographier l'étiquette** (appareil photo ou galerie).
+2. Placer les 4 coins sur les bords de l'étiquette ; les 2 points du milieu suivent la courbure du haut et du bas (la loupe aide à viser).
+   - **Sur la bouteille** : photo d'une étiquette collée sur la bouteille (elle est « déroulée »).
+   - **Étiquette à plat** : étiquette décollée, ou image prise sur un site.
+3. **Valider**, puis remplir la fiche. En tapant l'appellation, la région, la couleur et la forme de bouteille se remplissent toutes seules.
+
+Conseils photo : bien de face, à hauteur de l'étiquette, sans flash, à la lumière du jour.
+
+Sans photo, la bouteille reçoit une étiquette sobre générée. La forme (bourguignonne, bordelaise, jurassienne, clavelin, flûte, champenoise) vient de l'appellation, ou du choix « Forme de la bouteille » du formulaire.
+
+| Fichier | Rôle |
+|---|---|
+| `js/appellations.js` | ~230 appellations : région, couleur, forme de bouteille, garde |
+| `js/photos.js` | Photos d'étiquettes : rangement sur l'appareil, mise à plat |
+
+Les photos sont rangées sur le téléphone (IndexedDB) et incluses dans l'export de sauvegarde.
 
 ## Tester sur l'ordinateur
 
@@ -61,4 +78,4 @@ Après la première ouverture, l'appli fonctionne hors-ligne.
 - Réglages → **Exporter** pour sauvegarder / transférer vers un autre téléphone, **Importer** pour restaurer.
 - L'inventaire de départ est dans `js/data.js`.
 - Les fenêtres de dégustation sont indicatives et modifiables dans chaque fiche.
-- La garde maximale (en années après le millésime) est une estimation selon l'appellation, réglable dans `gardeMax()` de `js/app.js`.
+- La garde maximale (en années après le millésime) est une estimation selon l'appellation, réglable dans `js/appellations.js` (et `gardeMax()` de `js/app.js`).
