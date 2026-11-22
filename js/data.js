@@ -32,5 +32,5 @@ export const SEED = [
   { domaine: "Domaine Rolet", appellation: "Côtes du Jura", cuvee: "", vintage: 2018, color: "B", qty: 1, region: "Jura", garde: [2021, 2030] },
 
   // ——— Château de Poncié ———
-  { domaine: "Château de Poncié", appellation: "Côte de Brouilly", cuvee: "", vintage: 2023, color: "R", qty: 1, region: "Beaujolais", garde: [2025, 2031] },
+  { domaine: "Château de Poncié", appellation: "Côte de Brouilly", cuvee: "Le Pavé", vintage: 2023, color: "R", qty: 1, region: "Beaujolais", garde: [2025, 2031] },
 ];

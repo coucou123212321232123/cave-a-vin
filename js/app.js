@@ -2,8 +2,6 @@ import { SEED } from "./data.js";
 
 const STORE_KEY = "cave-camille-v1";
 const YEAR = new Date().getFullYear();
-const PER_SHELF = 6;
-const MIN_SHELVES = 5;
 
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
@@ -19,7 +17,7 @@ const SEED_HASH = (() => {
   return String(h);
 })();
 let state = load();
-const ui = { view: "cave", filter: "all", q: "", sort: "domaine", openId: null };
+const ui = { filter: "all", q: "", sort: "domaine" };
 
 function load() {
   try {
@@ -39,17 +37,15 @@ function save() {
 }
 
 /* ————————————————— Helpers vin ————————————————— */
-const COLORS = {
-  B: { label: "Blanc", dot: "var(--blanc)" },
-  R: { label: "Rouge", dot: "var(--rouge)" },
-};
+const COLORS = { B: { label: "Blanc", dot: "var(--blanc)" }, R: { label: "Rouge", dot: "var(--rouge)" } };
 const title = (w) => w.cuvee || w.appellation;
-const subtitle = (w) => (w.cuvee ? w.appellation : w.region || "");
+const subtitle = (w) => (w.cuvee ? w.appellation : "");
 const fullName = (w) => w.appellation + (w.cuvee ? " · " + w.cuvee : "");
 const vintageTxt = (w) => (w.vintage ? String(w.vintage) : "NM");
+const byId = (id) => state.wines.find((w) => w.id === id);
 
 function status(w) {
-  if (!w.garde || !w.garde[0] || !w.garde[1]) return { k: "none", t: "Garde non renseignée" };
+  if (!w.garde || !w.garde[0] || !w.garde[1]) return { k: "none", t: "Garde non renseignée", rank: 4 };
   const [a, b] = w.garde;
   if (YEAR < a) return { k: "young", t: `En garde · à partir de ${a}`, rank: 3 };
   if (YEAR < b) return { k: "ready", t: `Prêt à boire · jusqu'en ${b}`, rank: 2 };
@@ -59,14 +55,15 @@ function status(w) {
 const drinkable = (w) => ["ready", "soon", "late"].includes(status(w).k);
 const priority = (w) => ["soon", "late"].includes(status(w).k);
 
-function matches(w) {
-  if (ui.filter === "B" || ui.filter === "R") { if (w.color !== ui.filter) return false; }
-  if (ui.filter === "drink" && !drinkable(w)) return false;
-  if (ui.q) {
-    const hay = norm([w.domaine, w.appellation, w.cuvee, w.vintage, w.region, COLORS[w.color]?.label].join(" "));
-    if (!norm(ui.q).split(/\s+/).every((t) => hay.includes(t))) return false;
-  }
+function matchesFilter(w) {
+  if (ui.filter === "B" || ui.filter === "R") return w.color === ui.filter;
+  if (ui.filter === "drink") return drinkable(w);
   return true;
+}
+function matchesQuery(w) {
+  if (!ui.q) return true;
+  const hay = norm([w.domaine, w.appellation, w.cuvee, w.vintage, w.region, COLORS[w.color]?.label].join(" "));
+  return norm(ui.q).split(/\s+/).every((t) => hay.includes(t));
 }
 
 function sorted(list) {
@@ -74,104 +71,111 @@ function sorted(list) {
     domaine: (a, b) => a.domaine.localeCompare(b.domaine) || a.appellation.localeCompare(b.appellation) || (a.cuvee || "").localeCompare(b.cuvee || "") || (a.vintage || 9999) - (b.vintage || 9999),
     couleur: (a, b) => a.color.localeCompare(b.color) || a.domaine.localeCompare(b.domaine) || (a.vintage || 9999) - (b.vintage || 9999),
     millesime: (a, b) => (a.vintage || 9999) - (b.vintage || 9999) || a.domaine.localeCompare(b.domaine),
-    garde: (a, b) => (status(a).rank ?? 9) - (status(b).rank ?? 9) || (a.garde?.[1] || 9999) - (b.garde?.[1] || 9999),
+    garde: (a, b) => status(a).rank - status(b).rank || (a.garde?.[1] || 9999) - (b.garde?.[1] || 9999),
   }[ui.sort];
   return [...list].sort(by);
 }
+const layout = () => sorted(state.wines).flatMap((w) => Array.from({ length: w.qty }, () => ({ w })));
 
-/* ————————————————— SVG bouteille ————————————————— */
-document.body.insertAdjacentHTML("afterbegin", `
-<svg width="0" height="0" style="position:absolute" aria-hidden="true">
-  <defs>
-    <linearGradient id="gB" x1="0" x2="1">
-      <stop offset="0" stop-color="#3b3611"/><stop offset=".28" stop-color="#8c8338"/><stop offset=".55" stop-color="#5e5720"/><stop offset="1" stop-color="#28240a"/>
-    </linearGradient>
-    <linearGradient id="gR" x1="0" x2="1">
-      <stop offset="0" stop-color="#090c06"/><stop offset=".28" stop-color="#2c3a22"/><stop offset=".55" stop-color="#141c0f"/><stop offset="1" stop-color="#050704"/>
-    </linearGradient>
-    <linearGradient id="cB" x1="0" x2="1">
-      <stop offset="0" stop-color="#7d5f2c"/><stop offset=".4" stop-color="#ead09a"/><stop offset="1" stop-color="#8a6a33"/>
-    </linearGradient>
-    <linearGradient id="cR" x1="0" x2="1">
-      <stop offset="0" stop-color="#3f0811"/><stop offset=".4" stop-color="#a9283e"/><stop offset="1" stop-color="#4a0b16"/>
-    </linearGradient>
-    <linearGradient id="lbl" x1="0" x2="1">
-      <stop offset="0" stop-color="#b9ad95"/><stop offset=".35" stop-color="#f4ecdb"/><stop offset="1" stop-color="#a89b82"/>
-    </linearGradient>
-  </defs>
-</svg>`);
+/* ————————————————— Navigation (bouton retour du téléphone) ————————————————— */
+const stack = [];
+let afterPop = null;
+function push(onPop) { stack.push(onPop); history.pushState({ depth: stack.length }, ""); }
+function back(then) { if (!stack.length) { then?.(); return; } afterPop = then || null; history.back(); }
+function neutralizeTop() { if (stack.length) stack[stack.length - 1] = () => {}; }
+window.addEventListener("popstate", () => {
+  const fn = stack.pop();
+  fn?.();
+  const t = afterPop; afterPop = null; t?.();
+});
 
-function bottleSVG(w) {
-  const c = w.color === "R" ? "R" : "B";
-  const accent = c === "R" ? "#8e1b2c" : "#a88341";
-  return `<svg viewBox="0 0 40 130" aria-hidden="true">
-    <path d="M9 124Q9 129 14 129H26Q31 129 31 124V64C31 50 23.6 45 22.6 34V9H17.4V34C16.4 45 9 50 9 64Z" fill="url(#g${c})"/>
-    <rect x="16.4" y="4" width="7.2" height="27" rx="1.4" fill="url(#c${c})"/>
-    <rect x="16.4" y="29.6" width="7.2" height="1.4" fill="rgba(0,0,0,.25)"/>
-    <rect x="10.4" y="75" width="19.2" height="33" rx="1" fill="url(#lbl)"/>
-    <rect x="12.5" y="80" width="15" height="1" fill="${accent}"/>
-    <text x="20" y="96" text-anchor="middle" font-family="Cormorant Garamond, serif" font-weight="700" font-size="7.4" fill="#2b1e14">${esc(vintageTxt(w))}</text>
-    <rect x="13.5" y="101" width="13" height=".7" fill="#7a6a55"/>
-    <path d="M12 66C12 56 15.6 50 18.2 44H18.9C16.8 51 13.6 57 13.6 66V122H12Z" fill="#fff" opacity=".16"/>
-  </svg>`;
+/* ————————————————— Scène 3D ————————————————— */
+let S = null;
+const setMode = (m) => { document.body.dataset.mode = m; };
+const mode = () => document.body.dataset.mode;
+
+async function boot() {
+  renderStats();
+  renderList();
+  try {
+    S = await import("./scene.js");
+    await S.init($("#scene"), {
+      onCabinetTap: enterCabinet,
+      onBottleTap: (id, idx) => openBottle(id, idx),
+      onBackgroundTap: () => { if (mode() === "bottle") back(); },
+    });
+    S.setWines(layout());
+    S.setFilter(matchesFilter);
+    await new Promise((r) => setTimeout(r, 350));
+    setMode("overview");
+  } catch (e) {
+    console.error(e);
+    S = null;
+    setMode("fallback");
+  }
+  checkSeed();
 }
 
-/* ————————————————— Rendu ————————————————— */
+function refreshScene() {
+  if (!S) return;
+  S.setWines(layout());
+  S.setFilter(matchesFilter);
+}
+
+async function enterCabinet() {
+  if (!S || mode() !== "overview") return;
+  setMode("cabinet");
+  push(exitCabinet);
+  showHint();
+  await S.toCabinet();
+}
+function exitCabinet() {
+  setMode("overview");
+  S?.toOverview();
+}
+
+let hintTimer;
+function showHint() {
+  const h = $("#cab-hint");
+  h.classList.remove("gone");
+  clearTimeout(hintTimer);
+  hintTimer = setTimeout(() => h.classList.add("gone"), 4200);
+}
+
+async function openBottle(id, idx) {
+  const w = byId(id);
+  if (!w || !S) return;
+  if (mode() === "overview") { setMode("cabinet"); push(exitCabinet); }
+  if (mode() === "bottle") return;
+  renderDetail(w);
+  setMode("bottle");
+  push(closeBottle);
+  await S.focus(id, idx);
+}
+function closeBottle() {
+  setMode("cabinet");
+  S?.unfocus();
+}
+
+/* ————————————————— Rendu UI ————————————————— */
 function renderStats() {
   const n = (f) => state.wines.filter(f).reduce((s, w) => s + w.qty, 0);
-  const tot = n(() => true), b = n((w) => w.color === "B"), r = n((w) => w.color === "R"), p = n(priority);
   $("#stats").innerHTML = `
-    <div class="stat"><b>${tot}</b><span>bouteilles</span></div>
-    <div class="stat"><b>${b}</b><span><i style="background:var(--blanc)"></i>blancs</span></div>
-    <div class="stat"><b>${r}</b><span><i style="background:var(--rouge)"></i>rouges</span></div>
-    <div class="stat"><b>${p}</b><span><i style="background:var(--warn)"></i>priorité</span></div>`;
-}
-
-function shelfLabel(items) {
-  if (!items.length) return "";
-  if (ui.sort === "domaine") return [...new Set(items.map((w) => w.domaine))].join(" · ");
-  if (ui.sort === "couleur") return [...new Set(items.map((w) => COLORS[w.color]?.label + "s"))].join(" · ");
-  if (ui.sort === "millesime") {
-    const ys = items.map((w) => w.vintage).filter(Boolean);
-    if (!ys.length) return "";
-    const a = Math.min(...ys), b = Math.max(...ys);
-    return a === b ? String(a) : `${a} – ${b}`;
-  }
-  return "";
-}
-
-function renderCellar() {
-  const bottles = sorted(state.wines).flatMap((w) => Array.from({ length: w.qty }, (_, i) => ({ w, i })));
-  const shelves = Math.max(MIN_SHELVES, Math.ceil(bottles.length / PER_SHELF));
-  let html = "";
-  for (let s = 0; s < shelves; s++) {
-    const slice = bottles.slice(s * PER_SHELF, (s + 1) * PER_SHELF);
-    html += `<div class="shelf">`;
-    for (let k = 0; k < PER_SHELF; k++) {
-      const b = slice[k];
-      if (!b) { html += `<div class="slot empty"></div>`; continue; }
-      const { w } = b;
-      const flag = priority(w) ? `<span class="flag" style="background:var(--${status(w).k === "late" ? "late" : "warn"})"></span>` : "";
-      html += `<div class="slot"><button class="bottle${matches(w) ? "" : " dim"}" data-id="${w.id}" aria-label="${esc(fullName(w))} ${esc(vintageTxt(w))}, ${esc(w.domaine)}">${bottleSVG(w)}</button>${flag}</div>`;
-    }
-    html += `<span class="shelf-label">${esc(shelfLabel(slice.map((b) => b.w)))}</span></div>`;
-  }
-  $("#cellar").innerHTML = html;
-  if (!$(".legend", $("#view-cave"))) {
-    $("#view-cave").insertAdjacentHTML("beforeend", `<div class="legend">
-      <span><i style="background:var(--blanc)"></i>Blanc</span>
-      <span><i style="background:var(--rouge)"></i>Rouge</span>
-      <span><i style="background:var(--warn)"></i>À boire en priorité</span></div>`);
-  }
+    <div><b>${n(() => true)}</b><span>bouteilles</span></div>
+    <span class="sep"></span>
+    <div><b>${n((w) => w.color === "B")}</b><span><i style="background:var(--blanc)"></i>blancs</span></div>
+    <div><b>${n((w) => w.color === "R")}</b><span><i style="background:var(--rouge)"></i>rouges</span></div>
+    <span class="sep"></span>
+    <div><b>${n(priority)}</b><span><i style="background:var(--warn)"></i>à boire vite</span></div>`;
 }
 
 function renderList() {
-  const list = sorted(state.wines.filter(matches));
-  if (!list.length) {
-    $("#view-list").innerHTML = `<div class="empty-state">Aucune bouteille ne correspond.</div>`;
-    return;
-  }
-  const key = ui.sort === "couleur" ? (w) => COLORS[w.color].label + "s" : ui.sort === "millesime" ? (w) => (w.vintage ? String(w.vintage) : "Non millésimé") : ui.sort === "garde" ? (w) => ({ late: "À boire sans tarder", soon: "À boire cette année", ready: "Prêts à boire", young: "En garde", none: "Garde non renseignée" }[status(w).k]) : (w) => w.domaine;
+  const list = sorted(state.wines.filter((w) => matchesQuery(w)));
+  if (!list.length) { $("#list").innerHTML = `<div class="empty-state">Aucune bouteille ne correspond.</div>`; return; }
+  const key = ui.sort === "couleur" ? (w) => COLORS[w.color].label + "s"
+    : ui.sort === "millesime" ? (w) => (w.vintage ? String(w.vintage) : "Non millésimé")
+    : ui.sort === "garde" ? (w) => ({ late: "À boire sans tarder", soon: "À boire cette année", ready: "Prêts à boire", young: "En garde", none: "Garde non renseignée" }[status(w).k])
+    : (w) => w.domaine;
   const groups = new Map();
   for (const w of list) { const k = key(w); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(w); }
   let html = "";
@@ -181,68 +185,115 @@ function renderList() {
     for (const w of ws) {
       const st = status(w);
       html += `<button class="card" data-id="${w.id}">
-        <svg class="mini" viewBox="0 0 40 130" aria-hidden="true">${bottleSVG(w).replace(/^<svg[^>]*>|<\/svg>$/g, "")}</svg>
+        <span class="bar" style="background:${COLORS[w.color]?.dot}"></span>
         <div><div class="t">${esc(fullName(w))}</div>
-          <div class="s">${ui.sort === "domaine" ? "" : esc(w.domaine) + " · "}<span class="pill st-${st.k}">${esc(st.t.split(" · ")[0])}</span></div></div>
+          <div class="s">${ui.sort === "domaine" ? "" : `<span>${esc(w.domaine)}</span>`}<span class="pill st-${st.k}">${esc(st.t.split(" · ")[0])}</span></div></div>
         <div class="r"><div class="y">${esc(vintageTxt(w))}</div><div class="q">× ${w.qty}</div></div>
       </button>`;
     }
     html += `</div>`;
   }
-  $("#view-list").innerHTML = html;
+  $("#list").innerHTML = html;
 }
 
-function render() {
+function timelineHTML(w) {
+  const [a, b] = w.garde;
+  const lo = Math.min(w.vintage || a, YEAR), hi = Math.max(b, YEAR) + 1;
+  const pct = (y) => ((y - lo) / (hi - lo)) * 100;
+  return `<div class="timeline">
+      <div class="win" style="left:${pct(a)}%;width:${pct(b + 1) - pct(a)}%"></div>
+      <div class="now" style="left:calc(${pct(YEAR + 0.5)}% - 1px)"></div>
+    </div>
+    <div class="tl-scale"><span>${lo}</span><span>Apogée ${a} – ${b}</span><span>${hi}</span></div>`;
+}
+
+function renderDetail(w) {
+  const st = status(w);
+  const d = $("#detail");
+  d.innerHTML = `
+    <button class="round close" id="d-close" aria-label="Fermer">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
+    </button>
+    <span class="kicker rise">${esc(w.domaine)}</span>
+    <h2 class="d-title rise" style="animation-delay:.05s">${esc(title(w))}</h2>
+    <div class="d-sub rise" style="animation-delay:.1s">${esc(subtitle(w))}</div>
+    <div class="tags rise" style="animation-delay:.15s">
+      <span class="tag"><i style="background:${COLORS[w.color]?.dot}"></i>${COLORS[w.color]?.label || ""}</span>
+      <span class="tag">${w.vintage ? "Millésime " + esc(w.vintage) : "Millésime non renseigné"}</span>
+      ${w.region ? `<span class="tag">${esc(w.region)}</span>` : ""}
+    </div>
+    <div class="block rise" style="animation-delay:.2s">
+      <div class="count-row">
+        <div><b>${w.qty}</b> <span>bouteille${w.qty > 1 ? "s" : ""} en cave</span></div>
+        <span class="pill st-${st.k}">${esc(st.t.split(" · ")[0])}</span>
+      </div>
+      <button class="btn btn-wine mt" id="d-drink">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 3h8l-.6 6a3.4 3.4 0 0 1-6.8 0zM12 13v7M8.5 21h7"/></svg>
+        Déboucher cette bouteille
+      </button>
+    </div>
+    ${w.garde && w.garde[0] ? `<div class="block rise" style="animation-delay:.25s"><div class="block-h"><span>Fenêtre de dégustation</span><span class="st-${st.k}">${esc(st.t)}</span></div>${timelineHTML(w)}</div>` : ""}
+    <div class="block rise" style="animation-delay:.3s">
+      <div class="block-h"><span>Notes</span></div>
+      <textarea class="notes" id="d-notes" placeholder="Accords, souvenirs, occasion…">${esc(w.notes)}</textarea>
+    </div>
+    <div class="btn-row rise" style="animation-delay:.35s">
+      <button class="btn btn-ghost" id="d-edit">Modifier</button>
+      <button class="btn btn-ghost" id="d-back">Remettre en cave</button>
+    </div>`;
+  d.scrollTop = 0;
+  $("#d-notes").addEventListener("change", (e) => { w.notes = e.target.value; save(); });
+  $("#d-close").onclick = () => back();
+  $("#d-back").onclick = () => back();
+  $("#d-edit").onclick = () => openForm(w);
+  $("#d-drink").onclick = () => drink(w);
+}
+
+function renderAll() {
   renderStats();
-  renderCellar();
   renderList();
+  refreshScene();
+}
+
+/* ————————————————— Actions ————————————————— */
+async function drink(w) {
+  const snapshot = structuredClone(state);
+  w.qty -= 1;
+  state.history.unshift({ name: fullName(w), domaine: w.domaine, vintage: w.vintage, color: w.color, date: new Date().toISOString() });
+  state.history = state.history.slice(0, 200);
+  if (w.qty <= 0) state.wines = state.wines.filter((x) => x.id !== w.id);
+  save();
+  neutralizeTop();
+  back();
+  setMode("cabinet");
+  await S?.dropFocused();
+  renderAll();
+  toast(`Santé ! ${esc(title(w))} ${esc(vintageTxt(w))}`, {
+    label: "Annuler",
+    fn: () => { state = snapshot; save(); renderAll(); toast("Bouteille remise en cave"); },
+  });
 }
 
 /* ————————————————— Feuille du bas ————————————————— */
 const sheet = $("#sheet"), scrim = $("#scrim"), body = $("#sheet-body");
-let onSheetClose = null;
-
-function openSheet(html, { onClose } = {}) {
-  if (onSheetClose) { const f = onSheetClose; onSheetClose = null; f(); }
+function openSheet(html) {
   body.innerHTML = html;
   body.scrollTop = 0;
-  onSheetClose = onClose || null;
-  if (!sheet.classList.contains("on")) history.pushState({ sheet: true }, "");
-  sheet.classList.add("on");
-  scrim.classList.add("on");
+  sheet.classList.add("on"); scrim.classList.add("on");
+  push(hideSheet);
 }
-function closeSheet(fromPop = false) {
-  if (!sheet.classList.contains("on")) return;
-  sheet.classList.remove("on");
-  scrim.classList.remove("on");
+function hideSheet() {
+  sheet.classList.remove("on"); scrim.classList.remove("on");
   sheet.style.transform = "";
-  $$(".bottle.lift").forEach((b) => b.classList.remove("lift"));
-  if (onSheetClose) { const f = onSheetClose; onSheetClose = null; f(); }
-  ui.openId = null;
-  if (!fromPop && history.state?.sheet) history.back();
 }
-scrim.addEventListener("click", () => closeSheet());
-window.addEventListener("popstate", () => closeSheet(true));
-document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeSheet(); });
-
-// Glisser vers le bas pour fermer
+scrim.addEventListener("click", () => back());
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") back(); });
 (() => {
   let y0 = null, dy = 0;
-  const start = (e) => { y0 = e.touches ? e.touches[0].clientY : e.clientY; dy = 0; sheet.classList.add("dragging"); };
-  const move = (e) => {
-    if (y0 === null) return;
-    dy = Math.max(0, (e.touches ? e.touches[0].clientY : e.clientY) - y0);
-    sheet.style.transform = `translateY(${dy}px)`;
-  };
-  const end = () => {
-    if (y0 === null) return;
-    sheet.classList.remove("dragging");
-    y0 = null;
-    if (dy > 110) closeSheet(); else sheet.style.transform = "";
-  };
   const grab = $(".grab");
-  grab.addEventListener("pointerdown", (e) => { grab.setPointerCapture(e.pointerId); start(e); });
-  grab.addEventListener("pointermove", move);
+  grab.addEventListener("pointerdown", (e) => { grab.setPointerCapture(e.pointerId); y0 = e.clientY; dy = 0; sheet.classList.add("dragging"); });
+  grab.addEventListener("pointermove", (e) => { if (y0 === null) return; dy = Math.max(0, e.clientY - y0); sheet.style.transform = `translateY(${dy}px)`; });
+  const end = () => { if (y0 === null) return; sheet.classList.remove("dragging"); y0 = null; if (dy > 110) back(); else sheet.style.transform = ""; };
   grab.addEventListener("pointerup", end);
   grab.addEventListener("pointercancel", end);
 })();
@@ -252,104 +303,10 @@ let toastTimer;
 function toast(msg, action) {
   const t = $("#toast");
   t.innerHTML = `<span>${msg}</span>${action ? `<button>${action.label}</button>` : ""}`;
-  if (action) $("button", t).onclick = () => { action.fn(); t.classList.remove("on"); };
+  if (action) $("button", t).onclick = () => { t.classList.remove("on"); action.fn(); };
   t.classList.add("on");
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => t.classList.remove("on"), action ? 5000 : 2400);
-}
-
-/* ————————————————— Détail ————————————————— */
-let viewer = null;
-async function load3D() {
-  if (viewer) return viewer;
-  viewer = await import("./bottle3d.js");
-  return viewer;
-}
-
-function timelineHTML(w) {
-  if (!w.garde || !w.garde[0]) return "";
-  const [a, b] = w.garde;
-  const lo = Math.min(w.vintage || a, YEAR) , hi = Math.max(b, YEAR) + 1;
-  const pct = (y) => ((y - lo) / (hi - lo)) * 100;
-  return `<div class="timeline">
-      <div class="win" style="left:${pct(a)}%;width:${pct(b + 1) - pct(a)}%"></div>
-      <div class="now" style="left:calc(${pct(YEAR + 0.5)}% - 1px)" data-y="${YEAR}"></div>
-    </div>
-    <div class="tl-scale"><span>${lo}</span><span>Apogée ${a} – ${b}</span><span>${hi}</span></div>`;
-}
-
-function openDetail(id) {
-  const w = state.wines.find((x) => x.id === id);
-  if (!w) return;
-  ui.openId = id;
-  const st = status(w);
-  openSheet(`
-    <div class="stage" id="stage"><div class="spin-hint">Faites glisser pour tourner la bouteille</div></div>
-    <div class="d-kicker">${esc(w.domaine)}</div>
-    <h2 class="d-title">${esc(title(w))}</h2>
-    <div class="d-sub">${esc(subtitle(w))}</div>
-    <div class="chips">
-      <span class="chip"><i style="background:${COLORS[w.color]?.dot}"></i>${COLORS[w.color]?.label || ""}</span>
-      <span class="chip">Millésime ${esc(w.vintage || "non renseigné")}</span>
-      ${w.region ? `<span class="chip">${esc(w.region)}</span>` : ""}
-    </div>
-
-    <div class="block">
-      <div class="count-row">
-        <div><b id="d-qty">${w.qty}</b> <span>bouteille${w.qty > 1 ? "s" : ""} en cave</span></div>
-        <span class="pill st-${st.k}">${esc(st.t.split(" · ")[0])}</span>
-      </div>
-      <button class="btn btn-primary mt" id="d-drink">
-        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 3h8l-.6 6a3.4 3.4 0 0 1-6.8 0zM12 13v7M8.5 21h7"/></svg>
-        Déboucher une bouteille
-      </button>
-    </div>
-
-    ${w.garde && w.garde[0] ? `<div class="block"><div class="block-h"><span>Fenêtre de dégustation</span><span class="st-${st.k}">${esc(st.t)}</span></div>${timelineHTML(w)}</div>` : ""}
-
-    <div class="block">
-      <div class="block-h"><span>Notes</span></div>
-      <textarea class="notes" id="d-notes" placeholder="Accords, souvenirs, occasion…">${esc(w.notes)}</textarea>
-    </div>
-
-    <div class="btn-row">
-      <button class="btn btn-ghost" id="d-edit">Modifier</button>
-      <button class="btn btn-ghost" id="d-close">Fermer</button>
-    </div>
-  `, { onClose: () => viewer?.unmount() });
-
-  $$(`.bottle[data-id="${id}"]`).forEach((b) => b.classList.add("lift"));
-
-  const stage = $("#stage");
-  load3D().then((v) => { if (ui.openId === id && document.body.contains(stage)) v.mount(stage, w); })
-    .catch(() => {
-      stage.innerHTML = `<div class="fallback">${bottleSVG(w)}</div>`;
-    });
-
-  $("#d-notes").addEventListener("change", (e) => { w.notes = e.target.value; save(); });
-  $("#d-edit").onclick = () => openForm(w);
-  $("#d-close").onclick = () => closeSheet();
-  $("#d-drink").onclick = () => drink(w);
-}
-
-function drink(w) {
-  const snapshot = structuredClone(state);
-  w.qty -= 1;
-  state.history.unshift({ name: fullName(w), domaine: w.domaine, vintage: w.vintage, color: w.color, date: new Date().toISOString() });
-  state.history = state.history.slice(0, 200);
-  const gone = w.qty <= 0;
-  if (gone) state.wines = state.wines.filter((x) => x.id !== w.id);
-  save(); render();
-  if (gone) closeSheet();
-  else {
-    $("#d-qty").textContent = w.qty;
-    $("#d-qty").nextElementSibling.textContent = `bouteille${w.qty > 1 ? "s" : ""} en cave`;
-    $$(`.bottle[data-id="${w.id}"]`).forEach((b) => b.classList.add("lift"));
-  }
-  toast(`Santé ! ${esc(title(w))} ${esc(vintageTxt(w))}`, {
-    label: "Annuler",
-    fn: () => { state = snapshot; save(); render(); toast("Bouteille remise en cave"); if (ui.openId === w.id) openDetail(w.id); },
-  });
+  toastTimer = setTimeout(() => t.classList.remove("on"), action ? 5500 : 2400);
 }
 
 /* ————————————————— Formulaire ————————————————— */
@@ -357,9 +314,7 @@ function openForm(w) {
   const isNew = !w;
   const d = w || { domaine: "", appellation: "", cuvee: "", vintage: YEAR - 2, color: "R", qty: 1, region: "", garde: null, notes: "" };
   let color = d.color, qty = d.qty;
-  const domaines = [...new Set(state.wines.map((x) => x.domaine))].sort();
-  const apps = [...new Set(state.wines.map((x) => x.appellation))].sort();
-  const regions = [...new Set(state.wines.map((x) => x.region).filter(Boolean))].sort();
+  const uniq = (f) => [...new Set(state.wines.map(f).filter(Boolean))].sort();
   openSheet(`
     <form class="form" id="f">
       <h2>${isNew ? "Nouvelle bouteille" : "Modifier"}</h2>
@@ -387,9 +342,9 @@ function openForm(w) {
       </div>
       <button class="btn btn-primary mt" type="submit">${isNew ? "Ajouter à la cave" : "Enregistrer"}</button>
       ${isNew ? "" : `<button class="btn btn-danger mt" type="button" id="f-del">Retirer de la cave</button>`}
-      <datalist id="dl-dom">${domaines.map((x) => `<option value="${esc(x)}">`).join("")}</datalist>
-      <datalist id="dl-app">${apps.map((x) => `<option value="${esc(x)}">`).join("")}</datalist>
-      <datalist id="dl-reg">${regions.map((x) => `<option value="${esc(x)}">`).join("")}</datalist>
+      <datalist id="dl-dom">${uniq((x) => x.domaine).map((x) => `<option value="${esc(x)}">`).join("")}</datalist>
+      <datalist id="dl-app">${uniq((x) => x.appellation).map((x) => `<option value="${esc(x)}">`).join("")}</datalist>
+      <datalist id="dl-reg">${uniq((x) => x.region).map((x) => `<option value="${esc(x)}">`).join("")}</datalist>
     </form>`);
 
   const f = $("#f");
@@ -401,33 +356,42 @@ function openForm(w) {
     qty = Math.max(1, Math.min(99, qty + Number(b.dataset.q)));
     $("#f-qty").textContent = qty;
   }));
+
+  // Ferme la feuille, puis la fiche bouteille si elle est ouverte, puis exécute `then`
+  const leave = (then) => back(() => {
+    if (mode() === "bottle") { neutralizeTop(); back(() => { setMode("cabinet"); then(); }); }
+    else then();
+  });
+
   f.onsubmit = (e) => {
     e.preventDefault();
     const fd = new FormData(f);
     const num = (v) => (v === "" || v == null ? null : Number(v));
     const g0 = num(fd.get("g0")), g1 = num(fd.get("g1"));
     const data = {
-      domaine: fd.get("domaine").trim(),
-      appellation: fd.get("appellation").trim(),
-      cuvee: fd.get("cuvee").trim(),
-      vintage: num(fd.get("vintage")),
-      region: fd.get("region").trim(),
-      color, qty,
+      domaine: fd.get("domaine").trim(), appellation: fd.get("appellation").trim(), cuvee: fd.get("cuvee").trim(),
+      vintage: num(fd.get("vintage")), region: fd.get("region").trim(), color, qty,
       garde: g0 && g1 ? [Math.min(g0, g1), Math.max(g0, g1)] : null,
     };
     let id;
     if (isNew) { id = uid(); state.wines.push({ id, notes: "", ...data }); }
     else { Object.assign(w, data); id = w.id; }
-    save(); render();
-    toast(isNew ? "Bouteille ajoutée" : "Modifications enregistrées");
-    openDetail(id);
+    save();
+    leave(() => {
+      renderAll();
+      toast(isNew ? "Bouteille ajoutée" : "Modifications enregistrées");
+      if (S && mode() !== "fallback") setTimeout(() => openBottle(id), 250);
+    });
   };
   if (!isNew) $("#f-del").onclick = () => {
     if (!confirm(`Retirer « ${fullName(w)} ${vintageTxt(w)} » de la cave ?`)) return;
     const snapshot = structuredClone(state);
     state.wines = state.wines.filter((x) => x.id !== w.id);
-    save(); render(); closeSheet();
-    toast("Bouteille retirée", { label: "Annuler", fn: () => { state = snapshot; save(); render(); } });
+    save();
+    leave(() => {
+      renderAll();
+      toast("Bouteille retirée", { label: "Annuler", fn: () => { state = snapshot; save(); renderAll(); } });
+    });
   };
 }
 
@@ -466,58 +430,64 @@ function openSettings() {
     try {
       const data = JSON.parse(await file.text());
       if (!Array.isArray(data.wines)) throw new Error();
-      state = { wines: data.wines.map((w) => ({ id: w.id || uid(), notes: "", ...w })), history: data.history || [] };
-      save(); render(); closeSheet(); toast("Sauvegarde importée");
+      state = { wines: data.wines.map((w) => ({ id: w.id || uid(), notes: "", ...w })), history: data.history || [], seedHash: SEED_HASH };
+      save(); back(() => { renderAll(); toast("Sauvegarde importée"); });
     } catch { toast("Fichier invalide"); }
   };
   $("#s-reset").onclick = () => {
     if (!confirm("Remplacer la cave actuelle par l'inventaire initial ?")) return;
     const snapshot = structuredClone(state);
-    state = fresh(); save(); render(); closeSheet();
-    toast("Inventaire réinitialisé", { label: "Annuler", fn: () => { state = snapshot; save(); render(); } });
+    state = fresh(); save();
+    back(() => { renderAll(); toast("Inventaire réinitialisé", { label: "Annuler", fn: () => { state = snapshot; save(); renderAll(); } }); });
   };
 }
 
-/* ————————————————— Événements ————————————————— */
-document.addEventListener("click", (e) => {
-  const b = e.target.closest(".bottle, .card");
-  if (b?.dataset.id) openDetail(b.dataset.id);
+/* ————————————————— Inventaire ————————————————— */
+function openList() {
+  if (mode() === "fallback") return;
+  $("#list-panel").classList.add("on");
+  push(() => $("#list-panel").classList.remove("on"));
+}
+$("#btn-list").onclick = openList;
+$("#btn-list-close").onclick = () => back();
+$("#list").addEventListener("click", (e) => {
+  const c = e.target.closest(".card");
+  if (!c) return;
+  if (mode() === "fallback") { const w = byId(c.dataset.id); if (w) openForm(w); return; }
+  back(() => openBottle(c.dataset.id));
 });
+$("#q").addEventListener("input", (e) => { ui.q = e.target.value.trim(); renderList(); });
+$("#sort").addEventListener("change", (e) => { ui.sort = e.target.value; renderList(); refreshScene(); });
+
+/* ————————————————— Événements ————————————————— */
+$("#btn-enter").onclick = enterCabinet;
+$("#btn-back").onclick = () => back();
+$("#btn-add").onclick = () => openForm(null);
+$("#btn-settings").onclick = openSettings;
 $("#filters").addEventListener("click", (e) => {
   const b = e.target.closest("button[data-filter]");
   if (!b) return;
   ui.filter = b.dataset.filter;
   $$("#filters button").forEach((x) => x.classList.toggle("on", x === b));
-  renderCellar(); renderList();
+  S?.setFilter(matchesFilter);
 });
-$("#q").addEventListener("input", (e) => { ui.q = e.target.value.trim(); renderCellar(); renderList(); });
-$("#sort").addEventListener("change", (e) => { ui.sort = e.target.value; renderCellar(); renderList(); });
-$$(".tabbar button[data-view]").forEach((b) => (b.onclick = () => {
-  ui.view = b.dataset.view;
-  $$(".tabbar button[data-view]").forEach((x) => x.classList.toggle("on", x === b));
-  $$(".view").forEach((v) => v.classList.toggle("on", v.id === "view-" + ui.view));
-  window.scrollTo({ top: 0, behavior: "smooth" });
-}));
-$("#btn-add").onclick = () => openForm(null);
-$("#btn-settings").onclick = openSettings;
-
-render();
 
 // La liste de js/data.js a changé depuis la dernière visite : proposer de la charger
-if (state.seedHash !== SEED_HASH) {
+function checkSeed() {
+  if (state.seedHash === SEED_HASH) return;
   const t = $("#toast");
-  t.innerHTML = `<span>La liste de la cave a été mise à jour.</span><button id="seed-yes">Charger</button><button id="seed-no" style="color:#7d6b65">Ignorer</button>`;
+  t.innerHTML = `<span>La liste de la cave a été mise à jour.</span><button id="seed-yes">Charger</button><button id="seed-no" style="color:#bfae9c">Ignorer</button>`;
   t.classList.add("on");
   $("#seed-yes").onclick = () => {
     const history = state.history;
     state = fresh(); state.history = history;
-    save(); render(); t.classList.remove("on"); toast("Nouvelle liste chargée");
+    save(); t.classList.remove("on"); renderAll(); toast("Nouvelle liste chargée");
   };
   $("#seed-no").onclick = () => { state.seedHash = SEED_HASH; save(); t.classList.remove("on"); };
 }
 
-// Préchargement discret du moteur 3D, puis service worker (mode hors-ligne)
-setTimeout(() => load3D().catch(() => {}), 1200);
+boot();
+
 if ("serviceWorker" in navigator && location.protocol !== "file:") {
   navigator.serviceWorker.register("sw.js").catch(() => {});
 }

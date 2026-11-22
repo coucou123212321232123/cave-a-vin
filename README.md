@@ -1,6 +1,22 @@
 # La Cave de Camille
 
-Petite appli (PWA) pour visualiser la cave à vin depuis un téléphone : cave interactive, bouteilles en 3D, liste, fenêtres de dégustation, ajout / modification et historique des bouteilles ouvertes.
+Petite appli (PWA) pour visualiser la cave à vin depuis un téléphone : cave en 3D, bouteilles et étiquettes de chaque domaine, inventaire, fenêtres de dégustation, ajout / modification et historique des bouteilles ouvertes.
+
+- Touchez la cave (ou « Entrer dans la cave ») : elle pivote face à vous.
+- Glissez vers le haut / bas pour parcourir les étagères, touchez une bouteille : elle sort et vient devant vous.
+- Glissez à gauche / droite pour la faire tourner ; « Déboucher » la retire de la cave.
+
+## Fichiers
+
+| Fichier | Rôle |
+|---|---|
+| `js/data.js` | Inventaire de départ |
+| `js/labels.js` | Étiquettes, verre et capsule de chaque domaine |
+| `js/scene.js` | Scène 3D (cave, bouteilles, caméra) |
+| `js/app.js` | Interface, fiches, inventaire, sauvegardes |
+| `css/styles.css` | Thème et animations |
+
+Une bouteille d'un domaine inconnu reçoit une étiquette sobre générique. Pour lui faire une étiquette dédiée, ajouter une entrée dans `STYLES` de `js/labels.js`.
 
 ## Tester sur l'ordinateur
 
@@ -41,6 +57,6 @@ Après la première ouverture, l'appli fonctionne hors-ligne.
 ## Données
 
 - Les bouteilles sont enregistrées **sur l'appareil** (stockage local du navigateur).
-- Réglages (⚙) → **Exporter** pour sauvegarder / transférer vers un autre téléphone, **Importer** pour restaurer.
+- Réglages → **Exporter** pour sauvegarder / transférer vers un autre téléphone, **Importer** pour restaurer.
 - L'inventaire de départ est dans `js/data.js`.
 - Les fenêtres de dégustation sont indicatives et modifiables dans chaque fiche.

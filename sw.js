@@ -1,12 +1,13 @@
 // Service worker : l'application fonctionne hors-ligne une fois ouverte.
-const VERSION = "cave-v1";
+const VERSION = "cave-v2";
 const SHELL = [
   "./",
   "index.html",
   "css/styles.css",
   "js/app.js",
   "js/data.js",
-  "js/bottle3d.js",
+  "js/scene.js",
+  "js/labels.js",
   "manifest.webmanifest",
   "icons/icon.svg",
   "icons/icon-192.png",
