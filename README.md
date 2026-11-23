@@ -5,6 +5,7 @@ Petite appli (PWA) pour visualiser la cave à vin depuis un téléphone : cave e
 - Touchez la cave (ou « Entrer dans la cave ») : elle pivote face à vous et la porte vitrée s'efface.
 - Glissez dans tous les sens pour parcourir les clayettes des deux portes (la vue est assez proche pour lire les étiquettes), touchez une bouteille : elle sort et vient devant vous.
 - Glissez à gauche / droite pour la faire tourner ; « Déboucher » la retire de la cave et l'envoie dans les Souvenirs.
+- « Retirer sans souvenir » (erreur de saisie, bouteille offerte…) la sort de la cave sans l'ajouter aux Souvenirs ; « Annuler » la remet juste après.
 
 ## Plusieurs caves et rangement
 

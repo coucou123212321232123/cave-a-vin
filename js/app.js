@@ -340,6 +340,55 @@ function closeBottle() {
   S?.unfocus();
 }
 
+/* ————————————————— Éléments d'interface communs ————————————————— */
+const svg = (d, s = 18, w = 1.7) => `<svg viewBox="0 0 24 24" width="${s}" height="${s}" fill="none" stroke="currentColor" stroke-width="${w}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+const ICON = {
+  close: svg('<path d="M6 6l12 12M18 6 6 18"/>', 18, 1.8),
+  glass: svg('<path d="M8 3h8l-.6 6a3.4 3.4 0 0 1-6.8 0zM12 13v7M8.5 21h7"/>', 18, 1.9),
+  edit: svg('<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>'),
+  remove: svg('<circle cx="12" cy="12" r="8.5"/><path d="M8.5 12h7"/>'),
+  trash: svg('<path d="M5 7h14M10 7V4.5h4V7M7 7l1 13h8l1-13"/>'),
+  camera: svg('<path d="M4 8h3l2-2.5h6L17 8h3v11H4z"/><circle cx="12" cy="13" r="3.5"/>', 22, 1.5),
+  redo: svg('<path d="M20 12a8 8 0 1 1-2.3-5.7M20 4v4.5h-4.5"/>', 16),
+  export: svg('<path d="M12 15V4M7.5 8.5 12 4l4.5 4.5M5 14v5h14v-5"/>'),
+  import: svg('<path d="M12 4v11M7.5 10.5 12 15l4.5-4.5M5 14v5h14v-5"/>'),
+  reset: svg('<path d="M4 12a8 8 0 1 0 2.3-5.7M4 4v4.5h4.5"/>'),
+  chev: svg('<path d="M9 6l6 6-6 6"/>', 16),
+  mem: svg('<path d="M7 3h10l-.5 5.5a4.5 4.5 0 0 1-9 0zM12 13v8M8.5 21h7"/>'),
+};
+const RATING = ["", "Décevant", "Correct", "Bon", "Très bon", "Mémorable"];
+// en-tête des feuilles : petit titre doré, grand titre, sous-titre et bouton fermer
+const sheetHead = (kicker, h, sub = "") => `
+  <header class="sh-head">
+    <div><span class="kicker">${kicker}</span><h2>${h}</h2>${sub ? `<p>${sub}</p>` : ""}</div>
+    <button type="button" class="round sh-close" data-close aria-label="Fermer">${ICON.close}</button>
+  </header>`;
+
+// Boîte de confirmation (remplace confirm()) : renvoie la valeur du bouton choisi, ou null
+function ask({ kicker = "", title: h, text = "", buttons }) {
+  const el = $("#ask");
+  return new Promise((resolve) => {
+    el.innerHTML = `<div class="ask-card" role="alertdialog" aria-modal="true" aria-label="${esc(h)}">
+      ${kicker ? `<span class="kicker">${kicker}</span>` : ""}<h3>${h}</h3>${text ? `<p>${text}</p>` : ""}
+      <div class="ask-btns">${buttons.map((b, i) => `<button type="button" class="btn ${b.cls || "btn-ghost"}" data-i="${i}">${b.label}</button>`).join("")}</div>
+    </div>`;
+    requestAnimationFrame(() => el.classList.add("on"));
+    const done = (v) => {
+      el.classList.remove("on");
+      document.removeEventListener("keydown", key, true);
+      el.onclick = null;
+      resolve(v);
+    };
+    const key = (e) => { if (e.key === "Escape") { e.stopImmediatePropagation(); done(null); } };
+    document.addEventListener("keydown", key, true);
+    el.onclick = (e) => {
+      const b = e.target.closest("[data-i]");
+      if (b) done(buttons[+b.dataset.i].value ?? null);
+      else if (e.target === el) done(null);
+    };
+  });
+}
+
 /* ————————————————— Rendu UI ————————————————— */
 function renderStats() {
   const n = (f) => state.wines.filter(f).reduce((s, w) => s + w.qty, 0);
@@ -415,89 +464,124 @@ function timelineHTML(w) {
     <div class="tl-scale"><span>${lo}</span><span>Apogée ${a} – ${b}</span><span>${hi}</span></div>`;
 }
 
+// en-tête commun aux fiches : domaine, nom, appellation, puis la fiche technique
+function wineHead(w, extra = "") {
+  const c = COLORS[w.color] || {};
+  return `
+    <button class="round close" id="d-close" aria-label="Fermer">${ICON.close}</button>
+    <header class="d-head rise">
+      <span class="kicker">${esc(w.domaine)}</span>
+      <h2 class="d-title">${esc(title(w))}</h2>
+      ${subtitle(w) ? `<div class="d-sub">${esc(subtitle(w))}</div>` : ""}
+    </header>
+    <dl class="specs rise" style="animation-delay:.06s">
+      <div><dt>Millésime</dt><dd>${w.vintage ? esc(w.vintage) : "<em>NM</em>"}</dd></div>
+      <div><dt>Couleur</dt><dd><i class="dot" style="background:${c.dot}"></i>${esc(c.label || "")}</dd></div>
+      <div><dt>Région</dt><dd>${regionOf(w) ? esc(regionOf(w)) : "<em>—</em>"}</dd></div>
+      ${extra}
+    </dl>`;
+}
+
 function renderDetail(w) {
   const st = status(w);
   const d = $("#detail");
+  const garde = w.garde && w.garde[0];
   d.innerHTML = `
-    <button class="round close" id="d-close" aria-label="Fermer">
-      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
-    </button>
-    <span class="kicker rise">${esc(w.domaine)}</span>
-    <h2 class="d-title rise" style="animation-delay:.05s">${esc(title(w))}</h2>
-    <div class="d-sub rise" style="animation-delay:.1s">${esc(subtitle(w))}</div>
-    <div class="tags rise" style="animation-delay:.15s">
-      <span class="tag"><i style="background:${COLORS[w.color]?.dot}"></i>${COLORS[w.color]?.label || ""}</span>
-      <span class="tag">${w.vintage ? "Millésime " + esc(w.vintage) : "Millésime non renseigné"}</span>
-      ${w.region ? `<span class="tag">${esc(w.region)}</span>` : ""}
-    </div>
-    <div class="block rise" style="animation-delay:.2s">
-      <div class="count-row">
-        <div><b>${w.qty}</b> <span>bouteille${w.qty > 1 ? "s" : ""} en cave</span></div>
+    ${wineHead(w)}
+    <section class="d-cellar rise" style="animation-delay:.12s">
+      <div class="d-count"><b>${w.qty}</b><span>bouteille${w.qty > 1 ? "s" : ""}<br>en cave</span></div>
+      <div class="d-state">
         <span class="pill st-${st.k}">${esc(st.t.split(" · ")[0])}</span>
+        <small>${w.added ? "Entrée en cave " + esc(parseDate(w.added).toLocaleDateString("fr-FR", { month: "long", year: "numeric" })) : "Date d'entrée non renseignée"}</small>
       </div>
-      <button class="btn btn-wine mt" id="d-drink">
-        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 3h8l-.6 6a3.4 3.4 0 0 1-6.8 0zM12 13v7M8.5 21h7"/></svg>
-        Déboucher cette bouteille
-      </button>
+    </section>
+    <button class="btn btn-wine btn-lg rise" style="animation-delay:.16s" id="d-drink">${ICON.glass}Déboucher cette bouteille</button>
+    <div class="d-actions rise" style="animation-delay:.2s">
+      <button id="d-edit">${ICON.edit}<span><b>Modifier</b><small>la fiche</small></span></button>
+      <button id="d-remove">${ICON.remove}<span><b>Retirer</b><small>sans souvenir</small></span></button>
     </div>
-    <div class="block rise" style="animation-delay:.25s">
-      ${w.garde && w.garde[0] ? `<div class="block-h"><span>Fenêtre de dégustation</span><span class="st-${st.k}">${esc(st.t)}</span></div>${timelineHTML(w)}` : ""}
+    <section class="d-sec rise" style="animation-delay:.24s">
+      <h4>Dégustation</h4>
+      ${garde ? `<div class="block-h"><span>Apogée</span><span class="st-${st.k}">${esc(st.t)}</span></div>${timelineHTML(w)}` : ""}
       ${gardeMaxHTML(w)}
-    </div>
-    <div class="block rise" style="animation-delay:.3s">
-      <div class="block-h"><span>Notes</span></div>
-      <textarea class="notes" id="d-notes" placeholder="Accords, souvenirs, occasion…">${esc(w.notes)}</textarea>
-    </div>
-    <div class="btn-row rise" style="animation-delay:.35s">
-      <button class="btn btn-ghost" id="d-edit">Modifier</button>
-      <button class="btn btn-ghost" id="d-back">Remettre en cave</button>
-    </div>`;
+    </section>
+    <section class="d-sec rise" style="animation-delay:.28s">
+      <h4>Notes</h4>
+      <textarea class="notes" id="d-notes" rows="3" placeholder="Accords, impressions, à qui la faire goûter…">${esc(w.notes)}</textarea>
+    </section>`;
   d.scrollTop = 0;
   $("#d-notes").addEventListener("change", (e) => { w.notes = e.target.value; save(); });
   $("#d-close").onclick = () => back();
-  $("#d-back").onclick = () => back();
   $("#d-edit").onclick = () => openForm(w);
   $("#d-drink").onclick = () => openDrinkForm(w);
+  $("#d-remove").onclick = () => removeWithoutMemory(w);
+}
+
+// Erreur de saisie, bouteille offerte, cassée… : elle quitte la cave sans passer par les Souvenirs
+async function removeWithoutMemory(w) {
+  const name = `${esc(title(w))} ${esc(vintageTxt(w))}`;
+  const v = await ask({
+    kicker: "Retirer sans souvenir",
+    title: name,
+    text: "La bouteille quitte la cave sans rejoindre les Souvenirs — pratique après une erreur de saisie. Vous pourrez annuler juste après.",
+    buttons: [
+      ...(w.qty > 1 ? [{ label: "Retirer 1 bouteille", value: "one", cls: "btn-danger-solid" }, { label: `Retirer les ${w.qty}`, value: "all", cls: "btn-ghost danger" }]
+        : [{ label: "Retirer la bouteille", value: "all", cls: "btn-danger-solid" }]),
+      { label: "Annuler", value: null, cls: "btn-quiet" },
+    ],
+  });
+  if (!v) return;
+  const snapshot = structuredClone(state);
+  const n = v === "one" ? 1 : w.qty;
+  if (v === "one") w.qty -= 1;
+  else state.wines = state.wines.filter((x) => x.id !== w.id);
+  save();
+  if (mode() === "bottle") {
+    neutralizeTop();
+    back();
+    setMode("cabinet");
+    await S?.dropFocused("away");
+  }
+  renderAll();
+  toast(n > 1 ? `${n} bouteilles retirées` : `${name} retirée de la cave`, {
+    label: "Annuler",
+    fn: () => { state = snapshot; save(); renderAll(); toast("Bouteille remise en cave"); },
+  });
 }
 
 // Fiche d'un souvenir (bouteille vide du mur des souvenirs)
 function renderMemoryDetail(m) {
   const w = m.wine, d = $("#detail"), who = m.with || [];
   d.innerHTML = `
-    <button class="round close" id="d-close" aria-label="Fermer">
-      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
-    </button>
-    <span class="kicker rise">${esc(w.domaine)}</span>
-    <h2 class="d-title rise" style="animation-delay:.05s">${esc(title(w))}</h2>
-    <div class="d-sub rise" style="animation-delay:.1s">${esc(subtitle(w))}</div>
-    <div class="tags rise" style="animation-delay:.15s">
-      <span class="tag"><i style="background:${COLORS[w.color]?.dot}"></i>${COLORS[w.color]?.label || ""}</span>
-      <span class="tag">${w.vintage ? "Millésime " + esc(w.vintage) : "Non millésimé"}</span>
-      ${regionOf(w) ? `<span class="tag">${esc(regionOf(w))}</span>` : ""}
-    </div>
-    <div class="block mem-when rise" style="animation-delay:.2s">
+    ${wineHead(w)}
+    <section class="m-when rise" style="animation-delay:.12s">
       <span class="lbl">Débouchée le</span>
       <b>${esc(fmtLong(m.date))}</b>
-      ${m.rating ? `<div class="stars-ro" aria-label="${m.rating} sur 5">${[1, 2, 3, 4, 5].map((i) => `<i class="${i <= m.rating ? "on" : ""}">★</i>`).join("")}</div>` : ""}
-    </div>
-    <div class="block rise" style="animation-delay:.25s">
-      <div class="mem-row"><span class="lbl">Avec</span>
-        ${who.length ? `<div class="people">${who.map((p) => `<span class="person"><i>${esc(initials(p))}</i>${esc(p)}</span>`).join("")}</div>` : `<em class="none">Non renseigné</em>`}
-      </div>
-      <div class="mem-row"><span class="lbl">Contexte</span>
-        ${m.context || m.place ? `<div class="ctx">${m.context ? `<span class="tag">${esc(m.context)}</span>` : ""}${m.place ? `<span class="place">${esc(m.place)}</span>` : ""}</div>` : `<em class="none">Non renseigné</em>`}
-      </div>
-    </div>
-    ${m.note ? `<div class="block rise" style="animation-delay:.3s"><div class="block-h"><span>Souvenir</span></div><p class="mem-note">${esc(m.note)}</p></div>` : ""}
-    <div class="btn-row rise" style="animation-delay:.35s">
-      <button class="btn btn-ghost" id="m-edit">Modifier le souvenir</button>
-      <button class="btn btn-ghost" id="m-del">Supprimer</button>
+      ${m.rating ? `<div class="stars-ro" aria-label="${m.rating} sur 5">${[1, 2, 3, 4, 5].map((i) => `<i class="${i <= m.rating ? "on" : ""}">★</i>`).join("")}<span>${RATING[m.rating]}</span></div>` : ""}
+    </section>
+    <section class="d-sec rise" style="animation-delay:.18s">
+      <h4>Avec</h4>
+      ${who.length ? `<div class="people">${who.map((p) => `<span class="person"><i>${esc(initials(p))}</i>${esc(p)}</span>`).join("")}</div>` : `<em class="none">Personne n'a été noté</em>`}
+    </section>
+    ${m.context || m.place ? `<section class="d-sec rise" style="animation-delay:.22s">
+      <h4>L'occasion</h4>
+      <div class="ctx">${m.context ? `<span class="tag">${esc(m.context)}</span>` : ""}${m.place ? `<span class="place">${esc(m.place)}</span>` : ""}</div>
+    </section>` : ""}
+    ${m.note ? `<section class="d-sec rise" style="animation-delay:.26s"><h4>Souvenir</h4><blockquote class="mem-note">${esc(m.note)}</blockquote></section>` : ""}
+    <div class="d-actions rise" style="animation-delay:.3s">
+      <button id="m-edit">${ICON.edit}<span><b>Modifier</b><small>le souvenir</small></span></button>
+      <button id="m-del">${ICON.trash}<span><b>Supprimer</b><small>le souvenir</small></span></button>
     </div>`;
   d.scrollTop = 0;
   $("#d-close").onclick = () => back();
   $("#m-edit").onclick = () => openDrinkForm(null, m);
-  $("#m-del").onclick = () => {
-    if (!confirm("Supprimer ce souvenir ?")) return;
+  $("#m-del").onclick = async () => {
+    const ok = await ask({
+      kicker: "Supprimer le souvenir", title: `${esc(title(w))} ${esc(vintageTxt(w))}`,
+      text: `La bouteille du ${esc(fmtShort(m.date))} quitte le mur des Souvenirs.`,
+      buttons: [{ label: "Supprimer", value: 1, cls: "btn-danger-solid" }, { label: "Annuler", value: null, cls: "btn-quiet" }],
+    });
+    if (!ok) return;
     const snapshot = structuredClone(state);
     state.history = state.history.filter((x) => x.id !== m.id);
     save();
@@ -541,6 +625,7 @@ const sheet = $("#sheet"), scrim = $("#scrim"), body = $("#sheet-body");
 function openSheet(html) {
   body.innerHTML = html;
   body.scrollTop = 0;
+  $$("[data-close]", body).forEach((b) => (b.onclick = () => back()));
   sheet.classList.add("on"); scrim.classList.add("on");
   push(hideSheet);
 }
@@ -577,26 +662,29 @@ function openDrinkForm(w, m = null) {
   const edit = !!m, wine = edit ? m.wine : w;
   let rating = m?.rating || 0, context = m?.context || "";
   const people = knownPeople().slice(0, 14);
+  const c = COLORS[wine.color] || {};
   openSheet(`
     <form class="form" id="dk">
-      <h2>${edit ? "Le souvenir" : "Déboucher"}</h2>
-      <p class="dk-wine"><span>${esc(wine.domaine)}</span>${esc(fullName(wine))} · ${esc(vintageTxt(wine))}</p>
-      <div class="field"><label>Date</label><input type="date" name="date" required value="${esc((m?.date || today()).slice(0, 10))}" max="${today()}"></div>
-      <div class="field"><label>Avec qui</label>
-        <input name="with" value="${esc((m?.with || []).join(", "))}" placeholder="Prénoms, séparés par des virgules" autocomplete="off">
-        ${people.length ? `<div class="pick" id="dk-people">${people.map((p) => `<button type="button" data-p="${esc(p)}">${esc(p)}</button>`).join("")}</div>` : ""}
-      </div>
-      <div class="field"><label>Contexte</label>
-        <div class="pick" id="dk-ctx">${CONTEXTS.map((c) => `<button type="button" data-c="${c}" class="${c === context ? "on" : ""}">${c}</button>`).join("")}</div>
-        <input name="place" value="${esc(m?.place || "")}" placeholder="Lieu, plat, occasion… (facultatif)" autocomplete="off">
-      </div>
-      <div class="field"><label>Appréciation</label>
-        <div class="stars" id="dk-stars">${[1, 2, 3, 4, 5].map((i) => `<button type="button" data-r="${i}" aria-label="${i} sur 5">★</button>`).join("")}</div>
-      </div>
-      <div class="field"><label>Souvenir <span style="color:var(--faint)">(facultatif)</span></label>
-        <textarea name="note" rows="3" placeholder="Ce qu'on a mangé, ce qu'on a ressenti…">${esc(m?.note || "")}</textarea>
-      </div>
-      <button class="btn btn-wine mt" type="submit">${edit ? "Enregistrer" : `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 3h8l-.6 6a3.4 3.4 0 0 1-6.8 0zM12 13v7M8.5 21h7"/></svg> Déboucher et garder le souvenir`}</button>
+      ${sheetHead(edit ? "Le souvenir" : "Déboucher", edit ? "Modifier le souvenir" : "Un moment à garder")}
+      <div class="wine-chip"><i style="background:${c.dot}"></i><div><span>${esc(wine.domaine)}</span><b>${esc(fullName(wine))}</b></div><em>${esc(vintageTxt(wine))}</em></div>
+      <fieldset class="grp"><legend>Quand</legend>
+        <div class="grp-box"><label class="row"><span>Date</span><input type="date" name="date" required value="${esc((m?.date || today()).slice(0, 10))}" max="${today()}"></label></div>
+      </fieldset>
+      <fieldset class="grp"><legend>Avec qui</legend>
+        <div class="grp-box"><label class="row"><span>Prénoms</span><input name="with" value="${esc((m?.with || []).join(", "))}" placeholder="Séparés par des virgules" autocomplete="off"></label></div>
+        ${people.length ? `<div class="pick" id="dk-people">${people.map((p) => `<button type="button" data-p="${esc(p)}"><i>${esc(initials(p))}</i>${esc(p)}</button>`).join("")}</div>` : ""}
+      </fieldset>
+      <fieldset class="grp"><legend>L'occasion</legend>
+        <div class="pick" id="dk-ctx">${CONTEXTS.map((x) => `<button type="button" data-c="${x}" class="${x === context ? "on" : ""}">${x}</button>`).join("")}</div>
+        <div class="grp-box"><label class="row"><span>Lieu, plat, détail</span><input name="place" value="${esc(m?.place || "")}" placeholder="Facultatif" autocomplete="off"></label></div>
+      </fieldset>
+      <fieldset class="grp"><legend>Votre note</legend>
+        <div class="rate"><div class="stars" id="dk-stars">${[1, 2, 3, 4, 5].map((i) => `<button type="button" data-r="${i}" aria-label="${i} sur 5">★</button>`).join("")}</div><span id="dk-rate"></span></div>
+      </fieldset>
+      <fieldset class="grp"><legend>Un mot</legend>
+        <div class="grp-box"><label class="row"><textarea name="note" rows="3" placeholder="Ce qu'on a mangé, ce qu'on a ressenti…">${esc(m?.note || "")}</textarea></label></div>
+      </fieldset>
+      <div class="sh-foot"><button class="btn btn-wine btn-lg" type="submit">${edit ? "Enregistrer le souvenir" : `${ICON.glass}Déboucher et garder le souvenir`}</button></div>
     </form>`);
   const f = $("#dk"), withIn = f.elements.with;
   const names = () => withIn.value.split(",").map((x) => x.trim()).filter(Boolean);
@@ -612,7 +700,10 @@ function openDrinkForm(w, m = null) {
     context = context === b.dataset.c ? "" : b.dataset.c;
     $$("#dk-ctx button", f).forEach((x) => x.classList.toggle("on", x.dataset.c === context));
   }));
-  const paint = () => $$("#dk-stars button", f).forEach((b) => b.classList.toggle("on", +b.dataset.r <= rating));
+  const paint = () => {
+    $$("#dk-stars button", f).forEach((b) => b.classList.toggle("on", +b.dataset.r <= rating));
+    $("#dk-rate").textContent = RATING[rating] || "Touchez pour noter";
+  };
   $$("#dk-stars button", f).forEach((b) => (b.onclick = () => { rating = rating === +b.dataset.r ? 0 : +b.dataset.r; paint(); }));
   paint();
   f.onsubmit = (e) => {
@@ -784,48 +875,64 @@ function openForm(w) {
   const apps = [...new Set([...uniq((x) => x.appellation), ...APPELLATION_NAMES])];
   openSheet(`
     <form class="form" id="f">
-      <h2>${isNew ? "Nouvelle bouteille" : "Modifier"}</h2>
-      <div class="field"><label>Étiquette</label>
-        <div class="lab-pick">
-          <div class="lab-thumb" id="f-thumb"></div>
+      ${sheetHead(isNew ? "Ajouter à la cave" : esc(d.domaine), isNew ? "Nouvelle bouteille" : "Modifier la fiche")}
+      <section class="lab-hero" id="f-hero">
+        <button type="button" class="lab-thumb" id="f-thumb" aria-label="Photographier l'étiquette"></button>
+        <div class="lab-side">
+          <b id="f-lab-t"></b>
+          <span id="f-lab-s"></span>
           <div class="lab-actions">
-            <button type="button" class="btn btn-ghost" id="f-photo"></button>
-            <button type="button" class="btn btn-danger" id="f-photo-del">Retirer la photo</button>
+            <button type="button" class="mini" id="f-photo"></button>
+            <button type="button" class="mini danger" id="f-photo-del">Retirer</button>
           </div>
         </div>
         <input type="file" id="f-file" accept="image/*" hidden>
-      </div>
-      <div class="field"><label>Domaine</label><input name="domaine" list="dl-dom" required value="${esc(d.domaine)}" autocomplete="off"></div>
-      <div class="field"><label>Appellation</label><input name="appellation" list="dl-app" required value="${esc(d.appellation)}" autocomplete="off"></div>
-      <div class="field"><label>Cuvée <span style="color:var(--faint)">(facultatif)</span></label><input name="cuvee" value="${esc(d.cuvee)}" autocomplete="off"></div>
-      <div class="grid2">
-        <div class="field"><label>Millésime</label><input name="vintage" type="number" inputmode="numeric" min="1900" max="2100" value="${esc(d.vintage ?? "")}" placeholder="—"></div>
-        <div class="field"><label>Région</label><input name="region" list="dl-reg" value="${esc(d.region)}" autocomplete="off"></div>
-      </div>
-      <div class="field"><label>Couleur</label>
-        <div class="color-pick">
+      </section>
+      <fieldset class="grp"><legend>Le vin</legend>
+        <div class="grp-box">
+          <label class="row"><span>Domaine</span><input name="domaine" list="dl-dom" required value="${esc(d.domaine)}" placeholder="Château, domaine…" autocomplete="off"></label>
+          <label class="row"><span>Appellation</span><input name="appellation" list="dl-app" required value="${esc(d.appellation)}" placeholder="Pommard, Sancerre…" autocomplete="off"></label>
+          <label class="row"><span>Cuvée</span><input name="cuvee" value="${esc(d.cuvee)}" placeholder="Facultatif" autocomplete="off"></label>
+          <div class="row2">
+            <label class="row"><span>Millésime</span><input name="vintage" type="number" inputmode="numeric" min="1900" max="2100" value="${esc(d.vintage ?? "")}" placeholder="Non millésimé"></label>
+            <label class="row"><span>Région</span><input name="region" list="dl-reg" value="${esc(d.region)}" placeholder="Automatique" autocomplete="off"></label>
+          </div>
+        </div>
+        <p class="grp-hint" id="f-app-hint"></p>
+      </fieldset>
+      <fieldset class="grp"><legend>Robe et bouteille</legend>
+        <div class="seg color-pick">
           <button type="button" data-c="B" class="${color === "B" ? "on" : ""}"><i style="background:var(--blanc)"></i>Blanc</button>
           <button type="button" data-c="R" class="${color === "R" ? "on" : ""}"><i style="background:var(--rouge)"></i>Rouge</button>
         </div>
-      </div>
-      <div class="field"><label>Date d'obtention</label><input name="added" type="date" value="${esc(d.added || "")}" max="${today()}"></div>
-      <div class="field"><label>Forme de la bouteille</label>
-        <select name="bottle" id="f-bottle">
-          <option value="">Automatique</option>
-          ${Object.entries(SHAPE_NAMES).map(([k, v]) => `<option value="${k}"${d.bottle === k ? " selected" : ""}>${esc(v)}</option>`).join("")}
-        </select>
-      </div>
-      <div class="field"><label>Nombre de bouteilles</label>
-        <div class="stepper"><button type="button" data-q="-1">−</button><output id="f-qty">${qty}</output><button type="button" data-q="1">+</button></div>
-      </div>
-      <div class="field"><label>À boire entre <span style="color:var(--faint)">(facultatif)</span></label>
-        <div class="grid2">
-          <input name="g0" type="number" inputmode="numeric" placeholder="de" value="${esc(d.garde?.[0] ?? "")}">
-          <input name="g1" type="number" inputmode="numeric" placeholder="à" value="${esc(d.garde?.[1] ?? "")}">
+        <div class="grp-box">
+          <label class="row"><span>Forme de la bouteille</span>
+            <select name="bottle" id="f-bottle">
+              <option value="">Automatique</option>
+              ${Object.entries(SHAPE_NAMES).map(([k, v]) => `<option value="${k}"${d.bottle === k ? " selected" : ""}>${esc(v)}</option>`).join("")}
+            </select>
+          </label>
         </div>
-      </div>
-      <button class="btn btn-primary mt" type="submit">${isNew ? "Ajouter à la cave" : "Enregistrer"}</button>
-      ${isNew ? "" : `<button class="btn btn-danger mt" type="button" id="f-del">Retirer de la cave</button>`}
+      </fieldset>
+      <fieldset class="grp"><legend>En cave</legend>
+        <div class="grp-box">
+          <div class="row row-inline"><span>Nombre de bouteilles</span>
+            <div class="stepper"><button type="button" data-q="-1" aria-label="Une de moins">−</button><output id="f-qty">${qty}</output><button type="button" data-q="1" aria-label="Une de plus">+</button></div>
+          </div>
+          <label class="row"><span>Date d'obtention</span><input name="added" type="date" value="${esc(d.added || "")}" max="${today()}"></label>
+        </div>
+      </fieldset>
+      <fieldset class="grp"><legend>À boire entre</legend>
+        <div class="grp-box">
+          <div class="row2">
+            <label class="row"><span>De</span><input name="g0" type="number" inputmode="numeric" placeholder="Année" value="${esc(d.garde?.[0] ?? "")}"></label>
+            <label class="row"><span>À</span><input name="g1" type="number" inputmode="numeric" placeholder="Année" value="${esc(d.garde?.[1] ?? "")}"></label>
+          </div>
+        </div>
+        <p class="grp-hint">Facultatif : la garde maximale est estimée d'après l'appellation.</p>
+      </fieldset>
+      ${isNew ? "" : `<button class="link-danger" type="button" id="f-del">${ICON.trash}Supprimer cette fiche de la cave</button>`}
+      <div class="sh-foot"><button class="btn btn-primary btn-lg" type="submit">${isNew ? "Ajouter à la cave" : "Enregistrer"}</button></div>
       <datalist id="dl-dom">${uniq((x) => x.domaine).map((x) => `<option value="${esc(x)}">`).join("")}</datalist>
       <datalist id="dl-app">${apps.map((x) => `<option value="${esc(x)}">`).join("")}</datalist>
       <datalist id="dl-reg">${uniq((x) => x.region).map((x) => `<option value="${esc(x)}">`).join("")}</datalist>
@@ -845,12 +952,16 @@ function openForm(w) {
     th.innerHTML = "";
     if (photo && photo !== "remove") th.appendChild(photo.canvas);
     else if (hasPhoto()) { const c = PHOTOS.get(w.id); th.appendChild(c instanceof HTMLCanvasElement ? copyCanvas(c) : c.cloneNode()); }
-    else th.innerHTML = `<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-2.5h6L17 8h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>`;
-    $("#f-photo").textContent = hasPhoto() ? "Reprendre la photo" : "Photographier l'étiquette";
-    $("#f-photo-del").hidden = !hasPhoto();
+    else th.innerHTML = ICON.camera;
+    const has = hasPhoto();
+    $("#f-hero").classList.toggle("has", has);
+    $("#f-lab-t").textContent = has ? "Étiquette prête" : "L'étiquette";
+    $("#f-lab-s").textContent = has ? "Elle habillera la bouteille dans la cave." : "Photographiez-la : elle sera mise à plat et posée sur la bouteille.";
+    $("#f-photo").innerHTML = has ? `${ICON.redo}Reprendre` : `Prendre une photo`;
+    $("#f-photo-del").hidden = !has;
   };
   renderPhoto();
-  $("#f-photo").onclick = () => { $("#f-file").value = ""; $("#f-file").click(); };
+  $("#f-photo").onclick = $("#f-thumb").onclick = () => { $("#f-file").value = ""; $("#f-file").click(); };
   $("#f-file").onchange = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -865,6 +976,7 @@ function openForm(w) {
   const onApp = () => {
     const info = appellationInfo(appIn.value);
     shapeSel.options[0].textContent = `Automatique — ${SHAPE_NAMES[info?.shape || "burgundy"]}`;
+    $("#f-app-hint").innerHTML = info ? `<i></i>Appellation reconnue · ${esc(info.region)}` : "";
     if (!info) return;
     if (autoRegion !== null && (regIn.value === "" || regIn.value === autoRegion)) { regIn.value = info.region; autoRegion = info.region; }
     if (!colorTouched && info.color) setColor(info.color);
@@ -918,8 +1030,13 @@ function openForm(w) {
       if (S && mode() !== "fallback") setTimeout(() => openBottle(id), 250);
     });
   };
-  if (!isNew) $("#f-del").onclick = () => {
-    if (!confirm(`Retirer « ${fullName(w)} ${vintageTxt(w)} » de la cave ?`)) return;
+  if (!isNew) $("#f-del").onclick = async () => {
+    const ok = await ask({
+      kicker: "Supprimer la fiche", title: `${esc(fullName(w))} ${esc(vintageTxt(w))}`,
+      text: `${w.qty > 1 ? `Les ${w.qty} bouteilles quittent` : "La bouteille quitte"} la cave, sans rejoindre les Souvenirs.`,
+      buttons: [{ label: "Supprimer", value: 1, cls: "btn-danger-solid" }, { label: "Annuler", value: null, cls: "btn-quiet" }],
+    });
+    if (!ok) return;
     const snapshot = structuredClone(state);
     state.wines = state.wines.filter((x) => x.id !== w.id);
     save();
@@ -932,20 +1049,32 @@ function openForm(w) {
 
 /* ————————————————— Réglages ————————————————— */
 function openSettings() {
-  const h = state.history.slice(0, 30);
+  const h = [...state.history].sort((a, b) => parseDate(b.date) - parseDate(a.date)).slice(0, 5);
+  const n = state.wines.reduce((s, w) => s + w.qty, 0);
+  const item = (id, icon, t, s, cls = "") => `<button type="button" class="item ${cls}" id="${id}"><span class="ic">${icon}</span><span class="tx"><b>${t}</b><small>${s}</small></span>${ICON.chev}</button>`;
   openSheet(`
     <div class="settings">
-      <h2>Réglages</h2>
-      <p>Les données sont enregistrées sur cet appareil. Exportez une sauvegarde pour les transférer ou les conserver.</p>
-      <button class="btn btn-ghost" id="s-export">Exporter la cave (.json)</button>
-      <button class="btn btn-ghost" id="s-import">Importer une sauvegarde</button>
-      <input type="file" id="s-file" accept="application/json,.json" hidden>
-      <button class="btn btn-danger" id="s-reset">Revenir à l'inventaire initial</button>
-      <div class="history">
-        <h4>Dernières bouteilles ouvertes</h4>
-        ${h.length ? `<ul>${h.map((x) => `<li><span>${esc(fullName(x.wine))} ${esc(x.wine.vintage || "")}<br><small style="color:var(--faint)">${esc(x.wine.domaine)}${x.with?.length ? " · avec " + esc(x.with.join(", ")) : ""}</small></span><span>${parseDate(x.date).toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric" })}</span></li>`).join("")}</ul>` : `<p>Aucune pour l'instant.</p>`}
-      </div>
+      ${sheetHead("La cave de Camille", "Réglages", `${n} bouteille${n > 1 ? "s" : ""} en cave · ${state.history.length} souvenir${state.history.length > 1 ? "s" : ""}`)}
+      <fieldset class="grp"><legend>Sauvegarde</legend>
+        <div class="grp-box">
+          ${item("s-export", ICON.export, "Exporter la cave", "Fichier .json avec les photos d'étiquettes")}
+          ${item("s-import", ICON.import, "Importer une sauvegarde", "Remplace la cave de cet appareil")}
+        </div>
+        <p class="grp-hint">Les données restent sur cet appareil. Exportez de temps en temps pour les garder à l'abri ou les transférer.</p>
+        <input type="file" id="s-file" accept="application/json,.json" hidden>
+      </fieldset>
+      <fieldset class="grp"><legend>Derniers souvenirs</legend>
+        <div class="grp-box">
+          ${h.length ? h.map((x) => `<div class="hist"><i style="background:${COLORS[x.wine.color]?.dot}"></i><span><b>${esc(fullName(x.wine))} ${esc(x.wine.vintage || "")}</b><small>${esc(x.wine.domaine)}${x.with?.length ? " · avec " + esc(x.with.join(", ")) : ""}</small></span><em>${esc(parseDate(x.date).toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric" }))}</em></div>`).join("")
+            : `<div class="hist empty">Aucune bouteille débouchée pour l'instant.</div>`}
+          ${state.history.length ? item("s-mem", ICON.mem, "Voir tous les souvenirs", "Classés par année") : ""}
+        </div>
+      </fieldset>
+      <fieldset class="grp"><legend>Inventaire</legend>
+        <div class="grp-box">${item("s-reset", ICON.reset, "Revenir à l'inventaire initial", "Recharge la liste du fichier de départ", "danger")}</div>
+      </fieldset>
     </div>`);
+  if (state.history.length) $("#s-mem").onclick = () => back(() => openList("mem"));
 
   $("#s-export").onclick = async () => {
     const name = `cave-${new Date().toISOString().slice(0, 10)}.json`;
@@ -978,10 +1107,15 @@ function openSettings() {
       save(); back(() => { renderAll(); toast("Sauvegarde importée"); });
     } catch { toast("Fichier invalide"); }
   };
-  $("#s-reset").onclick = () => {
-    if (!confirm("Remplacer la cave actuelle par l'inventaire initial ?")) return;
+  $("#s-reset").onclick = async () => {
+    const ok = await ask({
+      kicker: "Inventaire initial", title: "Remplacer la cave actuelle ?",
+      text: "Les bouteilles de cet appareil sont remplacées par la liste de départ. Les souvenirs sont gardés.",
+      buttons: [{ label: "Remplacer", value: 1, cls: "btn-danger-solid" }, { label: "Annuler", value: null, cls: "btn-quiet" }],
+    });
+    if (!ok) return;
     const snapshot = structuredClone(state);
-    state = fresh(); save();
+    state = { ...fresh(), history: state.history }; save();
     back(() => { renderAll(); toast("Inventaire réinitialisé", { label: "Annuler", fn: () => { state = snapshot; save(); renderAll(); } }); });
   };
 }

@@ -1,5 +1,5 @@
 // Service worker : l'application fonctionne hors-ligne une fois ouverte.
-const VERSION = "cave-v6";
+const VERSION = "cave-v7";
 const SHELL = [
   "./",
   "index.html",

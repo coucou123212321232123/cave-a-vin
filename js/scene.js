@@ -1233,14 +1233,21 @@ export async function unfocus() {
 }
 
 // Bouteille débouchée : elle s'élève et disparaît
-export async function dropFocused() {
+// "up" : la bouteille s'envole (débouchée) ; "away" : elle s'efface en douceur (retirée)
+export async function dropFocused(kind = "up") {
   if (!focused) return;
   const b = focused;
   mode = "to-base";
   setDimSolid(false);
   if (focusShadow) b.remove(focusShadow);
   const p0 = b.position.clone(), op = dimPlane.material.opacity;
-  await tween(0.7, (e) => {
+  if (kind === "away") {
+    await tween(0.6, (e) => {
+      b.position.y = p0.y - 6 * e;
+      b.scale.setScalar(Math.max(0.001, 1 - e));
+      dimPlane.material.opacity = op * (1 - e);
+    }, (t) => t * t);
+  } else await tween(0.7, (e) => {
     b.position.y = p0.y + 18 * e;
     b.scale.setScalar(1 - 0.5 * e);
     b.rotation.y += 0.08;
